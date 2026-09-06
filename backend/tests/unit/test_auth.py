@@ -231,6 +231,22 @@ def test_api_surface_and_configured_prefix(auth_settings):
         "/api/test/auth/login": {"post"},
         "/api/test/auth/logout": {"post"},
         "/api/test/auth/me": {"get"},
+        "/api/test/artifacts/upload": {"post"},
+        "/api/test/artifacts": {"get"},
+        "/api/test/artifacts/bulk-upload": {"post"},
+        "/api/test/artifacts/{artifact_id}": {"get"},
+        "/api/test/audits": {"get", "post"},
+        "/api/test/audits/{audit_id}": {"get"},
+        "/api/test/audits/{audit_id}/run": {"post"},
+        "/api/test/devices": {"get", "post"},
+        "/api/test/devices/{device_id}": {"get", "patch"},
+        "/api/test/devices/{device_id}/snapshots": {"get", "post"},
+        "/api/test/snapshots/{snapshot_id}": {"get", "patch"},
+        "/api/test/snapshots/{snapshot_id}/artifacts/{artifact_id}": {
+            "delete", "post"
+        },
+        "/api/test/snapshots/{snapshot_id}/finalize": {"post"},
+        "/api/test/jobs/{job_id}": {"get"},
     }
     with TestClient(application) as client:
         assert client.post("/api/test/auth/register").status_code == 404

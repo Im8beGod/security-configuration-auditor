@@ -30,6 +30,17 @@ function safeErrorMessage(body: unknown, fallback: string): string {
   ) {
     return body.detail
   }
+  if (
+    typeof body === 'object' &&
+    body !== null &&
+    'detail' in body &&
+    typeof body.detail === 'object' &&
+    body.detail !== null &&
+    'message' in body.detail &&
+    typeof body.detail.message === 'string'
+  ) {
+    return body.detail.message
+  }
   return fallback
 }
 
@@ -50,7 +61,11 @@ export async function apiRequest(
   init: RequestInit = {},
 ): Promise<unknown> {
   const headers = new Headers(init.headers)
-  if (init.body !== undefined && !headers.has('Content-Type')) {
+  if (
+    init.body !== undefined &&
+    !(init.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json')
   }
 

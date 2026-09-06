@@ -68,6 +68,39 @@ settings exported, opt in to the real-DB check using SIH_AUTH_POSTGRES_TEST=1 an
 `python -m pytest -v tests/integration/test_auth_postgres.py`. It requires head
 20260906_0004 and rolls back all temporary identities in an outer transaction.
 
+## Device and Snapshot Workflow (Step 4B)
+
+- Device stores logical identity metadata only; vendor, platform, and historical
+  configuration facts do not belong on Device.
+- Snapshot membership is editable only while status is `draft`. Finalization is
+  the explicit `draft` to `ready` transition; `ready`, `locked`, and `archived`
+  membership is immutable.
+- Membership operations lock the Snapshot and Artifact rows and update
+  `snapshot_id`, `artifact_count`, and `snapshot_hash` in one transaction.
+- Snapshot hash is SHA-256 over concatenated lexicographically sorted member
+  Artifact SHA-256 values. The canonical empty-set hash is SHA-256 of empty bytes.
+- All Device, Snapshot, and Artifact lookups are scoped to the authenticated
+  user's organization. Client-provided tenant and lifecycle fields are rejected.
+- Step 4B does not create Audits or infer vendors. Audit-driven locking begins in
+  Step 4C.
+
+## Audit Submission Boundary (Step 4C)
+
+- An initial Audit is revision 1 and remains permanently bound to one ready
+  Snapshot. Creation leaves both the draft Audit and ready Snapshot editable only
+  according to their existing lifecycle rules.
+- `POST /audits/{audit_id}/run` locks Audit then Snapshot rows, revalidates evidence,
+  changes Snapshot to `locked`, changes Audit to `queued`, and flushes one `audit`
+  Job before committing the transaction.
+- API submission never sets Audit `started_at` or `processing_stage`; those belong
+  to a future real worker handler.
+- The production worker has no `audit` handler in Step 4C. Audit Jobs remain queued
+  with progress and attempt count zero until Step 5 starts real processing.
+- Job API responses omit payloads and expose only Audit-linked Jobs owned by the
+  authenticated organization. System and unowned Jobs fail closed.
+- Queued Audits have not been evaluated. Empty result metadata represents no
+  processing yet, never a successful zero-finding verdict.
+
 ## Frozen Principles
 
 - One Audit evaluates one Snapshot.

@@ -77,6 +77,13 @@ class LocalFilesystemArtifactStorage(ArtifactStorage):
         except OSError:
             raise ArtifactStorageError("Unable to inspect artifact bytes") from None
 
+    def delete(self, storage_reference: str) -> None:
+        target = self._resolve_reference(storage_reference)
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            raise ArtifactStorageError("Unable to delete artifact bytes") from None
+
     def _resolve_reference(self, storage_reference: str) -> Path:
         if not isinstance(storage_reference, str) or not storage_reference:
             raise InvalidStorageReferenceError("Invalid artifact storage reference")

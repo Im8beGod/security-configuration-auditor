@@ -71,6 +71,8 @@ class Settings(ApplicationSettings):
 
     artifact_storage_path: Path = Path("/app/storage/artifacts")
     report_storage_path: Path = Path("/app/storage/reports")
+    artifact_max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    artifact_max_bulk_files: int = Field(default=20, ge=1, le=100)
     worker_poll_interval_seconds: float = Field(
         default=1.0, ge=0.1, allow_inf_nan=False
     )

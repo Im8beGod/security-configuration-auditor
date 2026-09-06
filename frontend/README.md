@@ -15,3 +15,23 @@ Tokens and query data are not persisted in browser storage.
 On startup and refresh, `/auth/me` rehydrates the session through the HttpOnly
 cookie. Login updates the current-user query, while logout clears authenticated
 query data and returns to `/login`.
+
+## Step 4D Workflow
+
+The authenticated browser workflow now supports:
+
+```text
+Upload evidence -> Device -> draft Snapshot -> finalize -> Audit -> run -> Job status
+```
+
+`/uploads` handles bulk uploads and mixed per-file results. `/devices` and
+`/devices/:deviceId` manage logical assets and draft Snapshots, while
+`/snapshots/:snapshotId` provides refresh-safe Artifact membership and lifecycle
+actions. `/audits` and `/audits/:auditId` expose draft submission and poll queued
+Job status every five seconds while active.
+
+Draft Snapshot membership is editable. A ready Snapshot can create an Audit, and
+running that Audit locks the Snapshot; new evidence then requires a new Snapshot.
+The current worker intentionally leaves `audit` Jobs queued until Step 5 provides
+real processing. The frontend does not simulate progress or display vendor,
+compliance, finding, remediation, or report results.

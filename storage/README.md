@@ -20,5 +20,10 @@ Original filenames are metadata only and never influence physical placement.
 Local writes are immutable and atomically published: an existing reference is never
 silently overwritten. Reads and existence checks validate the logical format,
 resolved-root containment, and symlink destination. A future object-storage backend
-can implement the same small write/read/exists abstraction. Upload, hashing,
-validation, and Artifact-row creation remain Step 4 responsibilities.
+can implement the same small abstraction. Deletion exists only for compensation
+when persistence fails after a successful write; raw bytes belonging to a
+persisted Artifact remain immutable.
+
+Step 4A accepts authenticated single and bulk uploads through `/api/v1/artifacts`.
+Files are read in bounded chunks, validated before storage, and persisted with a
+canonical Artifact row. Bulk validation failures are isolated per file.

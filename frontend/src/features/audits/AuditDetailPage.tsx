@@ -1,0 +1,25 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useParams } from 'react-router-dom'
+
+import { getAudit, getDevice, getJob, getSnapshot, runAudit, workflowKeys } from '../../shared/api/workflow'
+import { QueryState, StatusBadge } from '../../shared/components/WorkflowUi'
+import { errorMessage, formatDate, shortId } from '../../shared/workflowFormat'
+
+const activeJob = (status?: string) => status === 'queued' || status === 'processing'
+
+export function AuditDetailPage() {
+  const { auditId = '' } = useParams()
+  const queryClient = useQueryClient()
+  const audit = useQuery({ queryKey: workflowKeys.audit(auditId), queryFn: () => getAudit(auditId), enabled: Boolean(auditId), refetchInterval: (query) => activeJob(query.state.data?.job?.status) ? 5000 : false })
+  const device = useQuery({ queryKey: workflowKeys.device(audit.data?.device_id ?? ''), queryFn: () => getDevice(audit.data!.device_id), enabled: Boolean(audit.data?.device_id) })
+  const snapshot = useQuery({ queryKey: workflowKeys.snapshot(audit.data?.snapshot_id ?? ''), queryFn: () => getSnapshot(audit.data!.snapshot_id), enabled: Boolean(audit.data?.snapshot_id) })
+  const job = useQuery({ queryKey: workflowKeys.job(audit.data?.job?.job_id ?? ''), queryFn: () => getJob(audit.data!.job!.job_id), enabled: Boolean(audit.data?.job?.job_id), refetchInterval: (query) => activeJob(query.state.data?.status) ? 5000 : false })
+  const run = useMutation({ mutationFn: () => runAudit(auditId), onSuccess: async (updated) => { queryClient.setQueryData(workflowKeys.audit(auditId), updated); await Promise.all([queryClient.invalidateQueries({ queryKey: workflowKeys.audits }), queryClient.invalidateQueries({ queryKey: workflowKeys.snapshot(updated.snapshot_id) }), queryClient.invalidateQueries({ queryKey: workflowKeys.snapshots(updated.device_id) }), updated.job ? queryClient.invalidateQueries({ queryKey: workflowKeys.job(updated.job.job_id) }) : Promise.resolve()]) } })
+
+  function confirmRun() {
+    if (window.confirm('Run this Audit? Its Snapshot will be locked and the Audit will enter the durable processing queue.')) run.mutate()
+  }
+
+  const currentJob = job.data ?? audit.data?.job
+  return <section className="page-stack"><Link className="back-link" to="/audits">← All Audits</Link><QueryState pending={audit.isPending} error={audit.error}><>{audit.data && <><header className="page-heading heading-actions"><div><span className="eyebrow">Audit · revision {audit.data.revision_number}</span><h1>Audit {shortId(audit.data.audit_id)}</h1><p>{device.data?.display_name ?? `Device ${shortId(audit.data.device_id)}`} · Snapshot {snapshot.data?.label ?? shortId(audit.data.snapshot_id)}</p></div><StatusBadge value={audit.data.status} /></header><div className="stat-strip"><div><span>Audit state</span><strong>{audit.data.status.replaceAll('_', ' ')}</strong></div><div><span>Processing stage</span><strong>{audit.data.processing_stage?.replaceAll('_', ' ') ?? 'Not started'}</strong></div><div><span>Created</span><strong>{formatDate(audit.data.created_at)}</strong></div></div>{audit.data.status === 'draft' && <div className="next-action"><div><strong>Ready to submit</strong><span>Running locks the Snapshot and places this Audit in the durable queue.</span></div><button className="button-primary" disabled={run.isPending} onClick={confirmRun}>{run.isPending ? 'Submitting...' : 'Run Audit'}</button></div>}{run.isError && <p className="error-message" role="alert">{errorMessage(run.error)}</p>}{currentJob && <section className="panel queue-panel"><div className="section-title"><div><span className="eyebrow">Durable job</span><h2>Queued for processing</h2></div><StatusBadge value={currentJob.status} /></div><div className="progress-track" aria-label={`Job progress ${currentJob.progress}%`}><span style={{ width: `${currentJob.progress}%` }} /></div><dl className="detail-grid"><div><dt>Progress</dt><dd>{currentJob.progress}%</dd></div><div><dt>Attempts</dt><dd>{currentJob.attempt_count}</dd></div><div><dt>Stage</dt><dd>{currentJob.stage ?? 'Waiting'}</dd></div><div><dt>Started</dt><dd>{formatDate(currentJob.started_at)}</dd></div></dl>{currentJob.status === 'queued' && <p className="boundary-note"><strong>Waiting safely in the queue</strong><span>The processing pipeline for audit jobs begins in Step 5. No analysis or compliance result has been produced.</span></p>}{currentJob.error_message && <p className="error-message" role="alert">{currentJob.error_message}</p>}</section>}<section className="panel"><h2>Audit intent</h2><dl className="detail-grid"><div><dt>Snapshot state</dt><dd>{snapshot.data ? <StatusBadge value={snapshot.data.status} /> : 'Loading'}</dd></div><div><dt>Framework requests</dt><dd>{audit.data.selected_frameworks.length ? audit.data.selected_frameworks.join(', ') : 'None selected'}</dd></div><div><dt>Started</dt><dd>{formatDate(audit.data.started_at)}</dd></div><div><dt>Completed</dt><dd>{formatDate(audit.data.completed_at)}</dd></div></dl></section></>}</></QueryState></section>
+}

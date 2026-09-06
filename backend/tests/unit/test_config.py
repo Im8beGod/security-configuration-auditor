@@ -26,6 +26,8 @@ def test_settings_load_typed_environment_values(
     monkeypatch.setenv("ARTIFACT_STORAGE_PATH", "/tmp/audit-artifacts")
     monkeypatch.setenv("REPORT_STORAGE_PATH", "/tmp/audit-reports")
     monkeypatch.setenv("WORKER_POLL_INTERVAL_SECONDS", "2.5")
+    monkeypatch.setenv("ARTIFACT_MAX_UPLOAD_BYTES", "12345")
+    monkeypatch.setenv("ARTIFACT_MAX_BULK_FILES", "7")
 
     settings = Settings(_env_file=None)
 
@@ -39,6 +41,8 @@ def test_settings_load_typed_environment_values(
     assert settings.artifact_storage_path == Path("/tmp/audit-artifacts")
     assert settings.report_storage_path == Path("/tmp/audit-reports")
     assert settings.worker_poll_interval_seconds == 2.5
+    assert settings.artifact_max_upload_bytes == 12345
+    assert settings.artifact_max_bulk_files == 7
     assert isinstance(settings.worker_poll_interval_seconds, float)
     assert settings.database_url == (
         "postgresql+psycopg://auditor:test_database_password"

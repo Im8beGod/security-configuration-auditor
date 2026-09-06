@@ -32,3 +32,7 @@ class ArtifactStorage(ABC):
     @abstractmethod
     def exists(self, storage_reference: str) -> bool:
         """Report whether bytes exist for a validated logical reference."""
+
+    @abstractmethod
+    def delete(self, storage_reference: str) -> None:
+        """Delete bytes addressed by a validated reference for compensation only."""

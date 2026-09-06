@@ -6,6 +6,7 @@ import type { AuthUser } from '../shared/types/auth'
 
 const primaryNavigation = [
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/uploads', label: 'Upload / Evidence' },
   { to: '/devices', label: 'Devices' },
   { to: '/audits', label: 'Audits' },
   { to: '/findings', label: 'Findings' },

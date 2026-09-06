@@ -78,6 +78,16 @@ def test_missing_reference_has_controlled_semantics(tmp_path):
         storage.read(reference)
 
 
+def test_delete_is_idempotent_and_reference_validated(tmp_path):
+    storage = LocalFilesystemArtifactStorage(tmp_path)
+    reference = storage.write(b"temporary", organization_id=uuid4(), artifact_id=uuid4())
+    storage.delete(reference)
+    storage.delete(reference)
+    assert storage.exists(reference) is False
+    with pytest.raises(InvalidStorageReferenceError):
+        storage.delete("../outside")
+
+
 def test_resolution_failure_is_a_controlled_reference_error(tmp_path, monkeypatch):
     storage = LocalFilesystemArtifactStorage(tmp_path)
     reference = storage.storage_reference(uuid4(), uuid4())

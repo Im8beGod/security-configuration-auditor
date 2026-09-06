@@ -18,7 +18,7 @@ def create_app(settings: ApplicationSettings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=[routing_settings.frontend_origin],
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["DELETE", "GET", "PATCH", "POST"],
         allow_headers=["Content-Type"],
     )
     application.add_api_route("/health", health_check, methods=["GET"])

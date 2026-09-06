@@ -1,0 +1,94 @@
+﻿services:
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: sih26155-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-security_auditor}
+      POSTGRES_USER: ${POSTGRES_USER:-security_auditor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_development_only}
+
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-security_auditor} -d ${POSTGRES_DB:-security_auditor}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: sih26155-backend
+    restart: unless-stopped
+
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+
+      POSTGRES_DB: ${POSTGRES_DB:-security_auditor}
+      POSTGRES_USER: ${POSTGRES_USER:-security_auditor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_development_only}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+
+      ARTIFACT_STORAGE_PATH: /app/storage/artifacts
+      REPORT_STORAGE_PATH: /app/storage/reports
+
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+    volumes:
+      - ./storage:/app/storage
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    container_name: sih26155-frontend
+    restart: unless-stopped
+
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+
+    depends_on:
+      - backend
+
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+
+    container_name: sih26155-worker
+    
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+volumes:
+  postgres_data:

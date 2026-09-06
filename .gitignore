@@ -1,0 +1,86 @@
+﻿# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+backend/.venv/
+
+# ==========================================
+# Node / React / Vite
+# ==========================================
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.vite/
+
+# ==========================================
+# Environment / Secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ==========================================
+# Runtime Storage
+# ==========================================
+storage/artifacts/*
+!storage/artifacts/.gitkeep
+
+storage/reports/*
+!storage/reports/.gitkeep
+
+# ==========================================
+# Logs / Temporary Files
+# ==========================================
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+
+# ==========================================
+# IDE / Editor
+# ==========================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# ==========================================
+# Operating System
+# ==========================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==========================================
+# Test / Build Artifacts
+# ==========================================
+coverage/
+test-results/
+playwright-report/
+
+# ==========================================
+# Miscellaneous
+# ==========================================
+*.swp
+*.swo
+*~

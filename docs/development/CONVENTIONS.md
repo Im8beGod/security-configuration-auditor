@@ -66,7 +66,7 @@ postgres:5432. Settings do not automatically load a .env file for host commands.
 Normal `python -m pytest -v` tests do not require PostgreSQL. With development DB
 settings exported, opt in to the real-DB check using SIH_AUTH_POSTGRES_TEST=1 and
 `python -m pytest -v tests/integration/test_auth_postgres.py`. It requires head
-20260906_0004 and rolls back all temporary identities in an outer transaction.
+20260907_0005 and rolls back all temporary identities in an outer transaction.
 
 ## Device and Snapshot Workflow (Step 4B)
 

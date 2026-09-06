@@ -12,6 +12,34 @@ jobs:
     name: Backend
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: security_auditor_test
+          POSTGRES_USER: security_auditor_test
+          POSTGRES_PASSWORD: ci-test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U security_auditor_test -d security_auditor_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      APP_ENV: test
+      POSTGRES_DB: security_auditor_test
+      POSTGRES_USER: security_auditor_test
+      POSTGRES_PASSWORD: ci-test-only-password
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      JWT_SECRET: ci-test-only-signing-key-at-least-32-characters
+      SIH_AUTH_POSTGRES_TEST: "1"
+      SIH_PERSISTENCE_POSTGRES_TEST: "1"
+      SIH_JOBS_POSTGRES_TEST: "1"
+      SIH_WORKER_POSTGRES_TEST: "1"
+
     defaults:
       run:
         working-directory: backend
@@ -30,8 +58,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Apply and verify migrations
+        run: |
+          alembic -c ../database/alembic.ini upgrade head
+          alembic -c ../database/alembic.ini heads | grep -F "20260906_0004 (head)"
+          alembic -c ../database/alembic.ini current | grep -F "20260906_0004 (head)"
+
       - name: Run tests
         run: python -m pytest -v
+
+      - name: Check migration drift
+        run: alembic -c ../database/alembic.ini check
 
 
   frontend:
@@ -59,6 +96,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Lint frontend
+        run: npm run lint
+
 
   compose:
     name: Docker Compose Configuration
@@ -69,4 +109,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate Docker Compose
-        run: docker compose config
+        run: docker compose config --quiet

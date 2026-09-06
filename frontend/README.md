@@ -1,32 +1,17 @@
-# React + TypeScript + Vite
+# SIH 26155 Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The React application uses centralized React Router and TanStack Query providers.
+Authenticated routes share an application shell with primary navigation, current
+user identity, and logout. Dashboard, Devices, Audits, Findings, and Reports are
+available to all authenticated roles. Training navigation and its frontend route
+guard are limited to `mapping_admin` and `admin`; backend authorization remains
+authoritative.
 
-Currently, two official plugins are available:
+Browser API requests use `VITE_API_BASE_URL`, which defaults locally to
+`http://localhost:8000/api/v1`. The shared native-fetch client always includes
+credentials so the browser can manage the backend's HttpOnly authentication cookie.
+Tokens and query data are not persisted in browser storage.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+On startup and refresh, `/auth/me` rehydrates the session through the HttpOnly
+cookie. Login updates the current-user query, while logout clears authenticated
+query data and returns to `/login`.

@@ -20,8 +20,9 @@ Technology baseline:
 
 - React + TypeScript
 - Python + FastAPI
-- PostgreSQL + JSONB
-- protected filesystem artifact storage
+- PostgreSQL 17 + JSONB
+- SQLAlchemy 2.x + Alembic
+- protected filesystem `ArtifactStorage`
 - Docker
 - Docker Compose
 
@@ -79,7 +80,9 @@ Health endpoint:
 
 From the frontend directory:
 
-    npm install
+    npm ci
+    npm run build
+    npm run lint
     npm run dev
 
 Development URL:
@@ -88,27 +91,36 @@ Development URL:
 
 ## Docker
 
-Validate:
+Create the local environment file once, then replace the development-only
+password and JWT placeholders with values used only on your workstation:
 
-    docker compose config
+    Copy-Item .env.example .env
 
-Build:
+Validate, build, and start the four-service development environment:
 
+    docker compose config --quiet
     docker compose build
-
-Start:
-
     docker compose up -d
 
-Inspect:
+Apply migrations explicitly after PostgreSQL is healthy. Neither the backend nor
+the worker runs migrations automatically:
 
-    docker compose ps -a
+    docker compose run --rm backend alembic -c database/alembic.ini upgrade head
 
-Stop:
+Inspect service state and logs:
+
+    docker compose ps
+    docker compose logs backend worker frontend postgres
+
+Stop containers without deleting the persistent database volume:
 
     docker compose down
 
-PostgreSQL uses container port 5432 and host port 5433 by default.
+The browser frontend is available at `http://localhost:5173` and calls
+`http://localhost:8000/api/v1`. PostgreSQL uses `postgres:5432` inside
+Compose and host port `5433`. Backend and worker share the protected
+`./storage` bind mount. This Compose configuration is for local development,
+not production deployment.
 
 ## Environment
 
@@ -120,7 +132,21 @@ never be committed.
 ## Current Status
 
 - Step 1 — Implementation Contracts: COMPLETE / FROZEN
-- Step 2 — Repository Setup: IN PROGRESS
-- Step 3 — Basic Platform Skeleton: NOT STARTED
+- Step 2 — Repository Setup: COMPLETE / FROZEN
+- Step 3 — Basic Platform Skeleton: IN PROGRESS
 
-No production auditing functionality has been implemented yet.
+The current Step 3 skeleton provides Organization/User persistence,
+HttpOnly-cookie authentication, backend RBAC roles (`analyst`,
+`mapping_admin`, and `admin`), an explicit bootstrap-admin command,
+PostgreSQL-backed durable jobs, and a persistent worker. There is no public
+registration. The production worker currently handles only the
+`SYSTEM_NOOP` job type (persisted as `system_noop`); all real job types
+remain queued.
+
+The four local Compose services are `frontend`, `backend`, `worker`, and
+`postgres`. Current Alembic head is `20260906_0004`.
+
+The skeleton does **not** yet implement upload/device/audit workflows, vendor
+parsing, EffectiveState resolution, compliance evaluation, findings,
+remediation, reports/PDF generation, AI learning workflows, or real dashboard
+data.

@@ -6,10 +6,169 @@
 
 body {
   margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: #172033;
+  background: #f4f6f9;
+}
+
+.login-page {
+  max-width: 900px;
+  margin: 0 auto;
   padding: 2rem;
 }
 
-main {
-  max-width: 900px;
-  margin: 0 auto;
+.login-page form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+input,
+button {
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.65rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+}
+
+[role='alert'] {
+  color: #9b1c1c;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem;
+  color: white;
+  background: #172033;
+}
+
+.project-identity,
+.account-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.project-identity div,
+.account-summary div:first-child {
+  display: grid;
+  min-width: 0;
+}
+
+.project-identity span,
+.account-summary span {
+  font-size: 0.875rem;
+  color: #ccd3df;
+}
+
+.account-summary strong {
+  overflow-wrap: anywhere;
+}
+
+.project-mark {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid #8290a7;
+  border-radius: 0.4rem;
+  color: white !important;
+  font-weight: 700;
+}
+
+.app-body {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  min-height: calc(100vh - 4.75rem);
+}
+
+.primary-navigation {
+  padding: 1rem;
+  background: white;
+  border-right: 1px solid #d7dce4;
+}
+
+.primary-navigation ul {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.primary-navigation a {
+  display: block;
+  padding: 0.65rem 0.75rem;
+  color: #26354f;
+  text-decoration: none;
+  border-left: 0.25rem solid transparent;
+}
+
+.primary-navigation a:hover {
+  background: #eef2f7;
+}
+
+.primary-navigation a[aria-current='page'] {
+  border-left-color: #285b9c;
+  background: #e7eff9;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+.app-content {
+  width: 100%;
+  max-width: 75rem;
+  box-sizing: border-box;
+  padding: 2rem;
+}
+
+.logout-control {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logout-control p {
+  margin: 0;
+  color: #ffd1d1;
+}
+
+@media (max-width: 700px) {
+  .app-header,
+  .account-summary {
+    align-items: flex-start;
+  }
+
+  .app-header {
+    flex-direction: column;
+  }
+
+  .app-body {
+    grid-template-columns: 1fr;
+  }
+
+  .primary-navigation {
+    border-right: 0;
+    border-bottom: 1px solid #d7dce4;
+  }
+
+  .primary-navigation ul {
+    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  }
+
+  .app-content {
+    padding: 1.25rem;
+  }
 }

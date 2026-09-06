@@ -16,6 +16,12 @@ from app.db.models import (
 from app.jobs.enums import JobType
 from app.jobs.errors import JobError
 from app.jobs.service import enqueue_job
+from app.ingestion.storage import ArtifactStorage
+from app.profile_resolution import (
+    ProfileResolutionResult,
+    aggregate_snapshot_evidence,
+    resolve_profile,
+)
 from app.snapshots.service import ELIGIBLE_ARTIFACT_STATUSES, calculate_snapshot_hash
 
 
@@ -33,7 +39,7 @@ def create_audit(db: Session, user: User, request: AuditCreate) -> Audit:
         Device.organization_id == user.organization_id,
     )) is None:
         raise AuditValidationError("snapshot_identity_invalid", "Snapshot identity is inconsistent")
-    _validate_snapshot_evidence(db, snapshot)
+    validate_snapshot_evidence(db, snapshot)
     if db.scalar(select(Audit.audit_id).where(
         Audit.snapshot_id == snapshot.snapshot_id, Audit.revision_number == 1
     )) is not None:
@@ -112,7 +118,7 @@ def start_audit(db: Session, user: User, audit_id: UUID) -> tuple[Audit, Job]:
         raise AuditValidationError("audit_snapshot_invalid", "Audit Snapshot is inconsistent")
     if snapshot.status != SnapshotStatus.READY:
         raise AuditConflictError("snapshot_not_ready", "Snapshot is no longer ready")
-    _validate_snapshot_evidence(db, snapshot, lock=True)
+    validate_snapshot_evidence(db, snapshot, lock=True)
 
     snapshot.status = SnapshotStatus.LOCKED
     audit.status = AuditStatus.QUEUED
@@ -134,18 +140,122 @@ def start_audit(db: Session, user: User, audit_id: UUID) -> tuple[Audit, Job]:
     return audit, job
 
 
-def _validate_snapshot_evidence(
+def resolve_audit_profile(
+    db: Session,
+    storage: ArtifactStorage,
+    audit_id: UUID,
+    organization_id: UUID,
+) -> ProfileResolutionResult:
+    """Resolve one Audit's immutable Snapshot without holding locks during I/O."""
+    audit = db.scalar(select(Audit).where(
+        Audit.audit_id == audit_id,
+        Audit.organization_id == organization_id,
+    ))
+    if audit is None:
+        raise AuditNotFoundError("audit_not_found", "Audit not found")
+
+    snapshot = db.scalar(select(Snapshot).where(
+        Snapshot.snapshot_id == audit.snapshot_id
+    ))
+    device = db.scalar(select(Device).where(
+        Device.device_id == audit.device_id
+    ))
+    if snapshot is None or device is None or (
+        snapshot.organization_id != audit.organization_id
+        or snapshot.device_id != audit.device_id
+        or device.organization_id != audit.organization_id
+    ):
+        raise AuditValidationError(
+            "audit_resource_inconsistent", "Audit resources are inconsistent"
+        )
+    if snapshot.status not in {SnapshotStatus.READY, SnapshotStatus.LOCKED}:
+        raise AuditConflictError(
+            "snapshot_not_resolvable", "Audit Snapshot is not ready for profile resolution"
+        )
+
+    artifacts = validate_snapshot_evidence(db, snapshot)
+    expected_evidence = tuple(
+        (artifact.artifact_id, artifact.sha256) for artifact in artifacts
+    )
+    for artifact in artifacts:
+        db.expunge(artifact)
+    snapshot_id = snapshot.snapshot_id
+    device_id = device.device_id
+    db.rollback()
+
+    evidence = aggregate_snapshot_evidence(
+        storage,
+        snapshot_id=snapshot_id,
+        organization_id=organization_id,
+        device_id=device_id,
+        artifacts=artifacts,
+    )
+    result = resolve_profile(evidence)
+    try:
+        audit = db.scalar(select(Audit).where(
+            Audit.audit_id == audit_id,
+            Audit.organization_id == organization_id,
+        ).with_for_update())
+        if audit is None:
+            raise AuditNotFoundError("audit_not_found", "Audit not found")
+        snapshot = db.scalar(select(Snapshot).where(
+            Snapshot.snapshot_id == snapshot_id
+        ).with_for_update())
+        device = db.scalar(select(Device).where(
+            Device.device_id == device_id
+        ).with_for_update())
+        if snapshot is None or device is None or (
+            audit.snapshot_id != snapshot_id
+            or audit.device_id != device_id
+            or snapshot.organization_id != organization_id
+            or snapshot.device_id != device_id
+            or device.organization_id != organization_id
+        ):
+            raise AuditValidationError(
+                "audit_resource_changed", "Audit resources changed during profile resolution"
+            )
+        current_artifacts = validate_snapshot_evidence(db, snapshot, lock=True)
+        if tuple(
+            (artifact.artifact_id, artifact.sha256) for artifact in current_artifacts
+        ) != expected_evidence:
+            raise AuditValidationError(
+                "snapshot_evidence_changed",
+                "Snapshot evidence changed during profile resolution",
+            )
+        pinned_profile = audit.version_refs.get("device_profile_version_id")
+        if (
+            pinned_profile is not None
+            and pinned_profile != result.selected_profile_version_id
+        ):
+            raise AuditConflictError(
+                "audit_profile_version_conflict",
+                "Audit device-profile version is already pinned differently",
+            )
+        audit.profile_resolution = result.to_persisted()
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise AuditInfrastructureError(
+            "profile_resolution_persistence_failed",
+            "Audit profile resolution could not be persisted",
+        ) from None
+    db.refresh(audit)
+    return result
+
+
+def validate_snapshot_evidence(
     db: Session, snapshot: Snapshot, *, lock: bool = False
 ) -> list[Artifact]:
     statement = select(Artifact).where(
         Artifact.snapshot_id == snapshot.snapshot_id,
-        Artifact.organization_id == snapshot.organization_id,
     ).order_by(Artifact.artifact_id)
     if lock:
         statement = statement.with_for_update()
     artifacts = list(db.scalars(statement))
     if not artifacts or any(
-        artifact.status not in ELIGIBLE_ARTIFACT_STATUSES for artifact in artifacts
+        artifact.organization_id != snapshot.organization_id
+        or artifact.status not in ELIGIBLE_ARTIFACT_STATUSES
+        for artifact in artifacts
     ):
         raise AuditValidationError("snapshot_evidence_invalid", "Snapshot evidence is not eligible")
     expected_hash = calculate_snapshot_hash([artifact.sha256 for artifact in artifacts])

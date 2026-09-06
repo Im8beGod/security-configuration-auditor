@@ -22,7 +22,8 @@ from app.db.models import (
 
 
 EXPECTED_TABLES = {
-    "artifacts", "audits", "devices", "jobs", "organizations", "snapshots", "users"
+    "artifacts", "audits", "devices", "jobs", "organizations", "security_facts",
+    "snapshots", "users"
 }
 
 

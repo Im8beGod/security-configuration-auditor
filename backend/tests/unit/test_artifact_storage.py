@@ -56,6 +56,15 @@ def test_distinct_artifacts_and_immutable_overwrite(tmp_path):
     assert not list((tmp_path / "organizations" / str(organization_id) / "artifacts").glob("*.tmp"))
 
 
+def test_bounded_prefix_read_never_returns_more_than_requested(tmp_path):
+    storage = LocalFilesystemArtifactStorage(tmp_path)
+    reference = storage.write(b"0123456789", organization_id=uuid4(), artifact_id=uuid4())
+    assert storage.read_prefix(reference, 4) == b"0123"
+    assert storage.read(reference) == b"0123456789"
+    with pytest.raises(ValueError):
+        storage.read_prefix(reference, 0)
+
+
 @pytest.mark.parametrize("reference", [
     "../secret", "../../outside", "/absolute/path",
     r"C:\Windows\System32\something", r"\\server\share\file",

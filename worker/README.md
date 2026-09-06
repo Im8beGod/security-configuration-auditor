@@ -22,9 +22,14 @@ unsupported jobs remain queued. Idle and recoverable database-failure paths wait
 for `WORKER_POLL_INTERVAL_SECONDS` rather than busy-spinning.
 
 The process handles Docker SIGTERM and Ctrl+C cleanly. It never runs migrations.
-The only production handler is `SYSTEM_NOOP` (persisted as `system_noop`), a
-side-effect-free infrastructure check that ignores its payload. All real job
-types remain unsupported and queued;
-real handlers arrive in later steps. There is no API for enqueueing the noop job,
-and no audit execution, retry mechanism, scheduler, broker, or dynamic payload
-execution exists here.
+The only registered production handler is `SYSTEM_NOOP` (persisted as
+`system_noop`), a side-effect-free infrastructure check that ignores its payload.
+Step 5 also provides a real, thin `AuditJobHandler` adapter around the domain
+pipeline, but deliberately does not register it. The current worker contract
+automatically completes every successfully handled Job, while Step 5 must leave
+the canonical Audit nonterminal at `interpreting`; the Job has no stage-target or
+resumable-checkpoint contract that could represent that boundary truthfully.
+
+Audit Jobs therefore remain queued and unclaimed until a later pipeline batch can
+complete the canonical Audit lifecycle without fabricating compliance. There is
+no automatic retry mechanism, scheduler, broker, or dynamic payload execution.

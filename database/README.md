@@ -13,7 +13,7 @@ alembic -c database/alembic.ini upgrade head
 Migration scripts live in `database/migrations/`. New schema changes must be
 implemented as explicit Alembic revisions. The baseline revision is
 intentionally empty because it predates all application ORM models.
-The current migration head is `20260906_0004`.
+The current migration head is `20260907_0005`.
 
 The first application tables are `organizations` and `users`. Every user
 belongs to exactly one organization. User email addresses are globally unique
@@ -39,6 +39,14 @@ registered types; its sole production handler is currently `SYSTEM_NOOP`
 Redis, RabbitMQ, Kafka, Celery, and
 other broker services are intentionally absent. Job payloads are untrusted
 structured input and must never be dynamically executed or used for secrets.
+
+The `security_facts` table stores the frozen canonical meaning produced by the
+Step-5 Cisco IOS XE semantic pipeline. JSONB retains typed values, scopes,
+evidence references, deterministic Structural IR node IDs, and dependencies;
+stable UUID columns pin mapping and knowledge-pack provenance. Fact IDs are
+deterministic for an Audit, mapping version, source nodes, field, scope, entity,
+and value, so safe retries do not duplicate facts. These rows contain no
+EffectiveState or compliance verdicts.
 
 Directories:
 

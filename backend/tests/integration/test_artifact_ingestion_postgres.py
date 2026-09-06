@@ -34,7 +34,7 @@ def test_postgres_artifact_ingestion_and_tenant_isolation(tmp_path):
     storage = LocalFilesystemArtifactStorage(tmp_path / "artifacts")
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260906_0004"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0005"
             before = connection.scalar(select(func.count()).select_from(Artifact))
             connection.rollback()
             outer = connection.begin()

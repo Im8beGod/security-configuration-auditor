@@ -45,7 +45,7 @@ def test_concurrent_audit_start_is_atomic_tenant_scoped_and_worker_safe():
     device_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260906_0004"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0005"
         suffix = uuid4().hex
         first_org, first_user = bootstrap_admin(
             factory, "Audit Integration A", f"audit-integration-a-{suffix}",

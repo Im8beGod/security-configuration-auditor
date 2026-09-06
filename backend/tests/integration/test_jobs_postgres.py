@@ -4,7 +4,7 @@ import os
 from datetime import timezone
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, select, text
 
 from app.core.config import get_settings
 from app.db.engine import create_database_engine
@@ -23,12 +23,8 @@ def test_postgresql_skip_locked_and_lifecycle():
     engine = create_database_engine(get_settings())
     factory = create_session_factory(engine)
     job_ids = []
-    before_count = None
     session_a = session_b = None
     try:
-        with factory() as db:
-            before_count = db.scalar(select(func.count()).select_from(Job))
-            assert before_count == 0, "Concurrency verification requires an empty jobs table"
         with factory.begin() as db:
             for ordinal in range(4):
                 job = enqueue_job(
@@ -38,12 +34,12 @@ def test_postgresql_skip_locked_and_lifecycle():
 
         session_a, session_b = factory(), factory()
         session_a.begin()
-        first = claim_next_job(session_a)
+        first = claim_next_job(session_a, {JobType.SYSTEM_NOOP})
         assert first is not None
 
         session_b.begin()
         session_b.execute(text("SET LOCAL lock_timeout = '1s'"))
-        second = claim_next_job(session_b)
+        second = claim_next_job(session_b, {JobType.SYSTEM_NOOP})
         assert second is not None and second.job_id != first.job_id
         first_id, second_id = first.job_id, second.job_id
         session_b.commit()
@@ -62,7 +58,7 @@ def test_postgresql_skip_locked_and_lifecycle():
             assert all(job.started_at is not None for job in claimed)
 
         with factory.begin() as db:
-            success = claim_next_job(db)
+            success = claim_next_job(db, {JobType.SYSTEM_NOOP})
             assert success is not None
             success_id = success.job_id
         with factory.begin() as db:
@@ -75,7 +71,7 @@ def test_postgresql_skip_locked_and_lifecycle():
             assert completed.error_code is None and completed.error_message is None
 
         with factory.begin() as db:
-            failure = claim_next_job(db)
+            failure = claim_next_job(db, {JobType.SYSTEM_NOOP})
             assert failure is not None
             failure.progress = 41
             failure_id = failure.job_id
@@ -103,8 +99,7 @@ def test_postgresql_skip_locked_and_lifecycle():
         if job_ids:
             with factory.begin() as db:
                 db.execute(delete(Job).where(Job.job_id.in_(job_ids)))
-        if before_count is not None:
-            with factory() as db:
-                assert db.scalar(select(func.count()).select_from(Job)) == before_count
-                assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260906_0004"
+        with factory() as db:
+            assert not db.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0005"
         engine.dispose()

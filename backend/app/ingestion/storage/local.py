@@ -70,6 +70,20 @@ class LocalFilesystemArtifactStorage(ArtifactStorage):
         except OSError:
             raise ArtifactStorageError("Unable to read artifact bytes") from None
 
+    def read_prefix(self, storage_reference: str, max_bytes: int) -> bytes:
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+            raise ValueError("max_bytes must be a positive integer")
+        target = self._resolve_reference(storage_reference)
+        try:
+            if not target.is_file():
+                raise ArtifactNotFoundError("Artifact bytes were not found")
+            with target.open("rb") as artifact_file:
+                return artifact_file.read(max_bytes)
+        except ArtifactNotFoundError:
+            raise
+        except OSError:
+            raise ArtifactStorageError("Unable to read artifact bytes") from None
+
     def exists(self, storage_reference: str) -> bool:
         target = self._resolve_reference(storage_reference)
         try:

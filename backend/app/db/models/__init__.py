@@ -13,6 +13,13 @@ from app.db.models.audit import (
 from app.db.models.device import Device, DeviceClass, DeviceIdentityStatus
 from app.db.models.job import Job
 from app.db.models.organization import Organization
+from app.db.models.security_fact import (
+    FactState,
+    FactValidationStatus,
+    InterpretationConfidence,
+    InterpretationMethod,
+    SecurityFact,
+)
 from app.db.models.snapshot import (
     Snapshot,
     SnapshotGroupingStatus,
@@ -38,6 +45,11 @@ __all__ = [
     "JobStatus",
     "JobType",
     "Organization",
+    "FactState",
+    "FactValidationStatus",
+    "InterpretationConfidence",
+    "InterpretationMethod",
+    "SecurityFact",
     "Snapshot",
     "SnapshotGroupingStatus",
     "SnapshotSource",

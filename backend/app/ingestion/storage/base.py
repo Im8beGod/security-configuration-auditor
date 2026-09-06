@@ -30,6 +30,10 @@ class ArtifactStorage(ABC):
         """Return bytes for a validated logical reference."""
 
     @abstractmethod
+    def read_prefix(self, storage_reference: str, max_bytes: int) -> bytes:
+        """Return at most max_bytes without loading the complete artifact."""
+
+    @abstractmethod
     def exists(self, storage_reference: str) -> bool:
         """Report whether bytes exist for a validated logical reference."""
 

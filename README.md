@@ -161,6 +161,37 @@ Snapshots, locked evidence, draft Audits, and queued submissions.
 Step 4D adds no audit processor or compliance UI. Queued Audit Jobs remain queued
 until Step 5 supplies real vendor identification and parsing.
 
+### Step 5 Configuration semantics
+
+The backend now implements the bounded Step-5 domain pipeline:
+
+```text
+Immutable Snapshot evidence
+-> profile detection
+-> indentation_cli.v1 Structural IR
+-> validated Cisco IOS XE semantic mappings
+-> persisted canonical SecurityFacts
+```
+
+The initial profile is `cisco.ios_xe.17@1.0.0`, backed by knowledge pack
+`cisco_iosxe_17@1.0.0`. Supported facts cover VTY Telnet/SSH transport, VTY
+idle timeout, configured SSH version, remote logging destinations, and NTP
+servers. Audit processing pins the exact profile and knowledge-pack versions,
+retains artifact/line/IR-node provenance, and is idempotent for an immutable
+Audit and Snapshot.
+
+Step 5 leaves the Audit in `processing` at stage `interpreting`. It does not set
+`completed_at` or alter verdict, severity, or compliance coverage fields. The
+real audit Job adapter is implemented as a thin domain-service caller, but it is
+not registered in the production worker: the current Job lifecycle automatically
+marks every successful handler `completed`, while a canonical Audit cannot be
+complete before EffectiveState and compliance evaluation exist. Consequently,
+production audit Jobs remain queued without hot-loop claims or false completion.
+
+This is intentionally limited Cisco syntax support, not broad Cisco compliance
+support. EffectiveState, defaults, inheritance, precedence, compliance rules,
+Findings, remediation, and reporting remain unimplemented.
+
 ## Frontend
 
 From the frontend directory:
@@ -223,17 +254,18 @@ never be committed.
 - Step 4B — Device + Snapshot Workflow: IMPLEMENTED
 - Step 4C — Audit Creation + Durable Job Orchestration: IMPLEMENTED
 - Step 4D — End-User Frontend Workflow: IMPLEMENTED
+- Step 5 — Profile Detection, Structural IR, and Semantic Facts: IMPLEMENTED
 
-The current Step 3 skeleton provides Organization/User persistence,
+The platform provides Organization/User persistence,
 HttpOnly-cookie authentication, backend RBAC roles (`analyst`,
 `mapping_admin`, and `admin`), an explicit bootstrap-admin command,
 PostgreSQL-backed durable jobs, and a persistent worker. There is no public
-registration. The production worker currently handles only the
+registration. The production worker continues to handle only the
 `SYSTEM_NOOP` job type (persisted as `system_noop`); all real job types
 remain queued.
 
 The four local Compose services are `frontend`, `backend`, `worker`, and
-`postgres`. Current Alembic head is `20260906_0004`.
+`postgres`. Current Alembic head is `20260907_0005`.
 
 Step 4 implements authenticated Artifact ingestion, Device identity, immutable
 Snapshot evidence grouping, Audit creation, durable Job submission, and the
@@ -241,6 +273,6 @@ browser workflow connecting them. Starting an Audit locks its Snapshot; new
 evidence requires a new Snapshot. A queued Audit is only durable pending work,
 not an evaluated result.
 
-The application does **not** yet implement real Audit processing, vendor/profile
-identification, Cisco parsing, semantic interpretation, Effective State,
-compliance evaluation, Findings, remediation, or reports/PDF generation.
+The application now processes supported IOS XE evidence through canonical
+SecurityFacts. It does **not** yet implement EffectiveState, compliance
+evaluation, Findings, remediation, or reports/PDF generation.

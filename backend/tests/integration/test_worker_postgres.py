@@ -4,7 +4,7 @@ import os
 from datetime import timezone
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, select, text
 
 from app.core.config import get_settings
 from app.db.engine import create_database_engine
@@ -25,11 +25,7 @@ def test_production_noop_and_controlled_failure_lifecycle():
     engine = create_database_engine(settings)
     factory = create_session_factory(engine)
     job_ids = []
-    before_count = None
     try:
-        with factory() as db:
-            before_count = db.scalar(select(func.count()).select_from(Job))
-            assert before_count == 0, "Worker verification requires an empty jobs table"
         with factory.begin() as db:
             audit = enqueue_job(db, JobType.AUDIT, payload={"test_marker": "worker"})
             noop = enqueue_job(db, JobType.SYSTEM_NOOP, payload={"test_marker": "worker"})
@@ -81,8 +77,7 @@ def test_production_noop_and_controlled_failure_lifecycle():
         if job_ids:
             with factory.begin() as db:
                 db.execute(delete(Job).where(Job.job_id.in_(job_ids)))
-        if before_count is not None:
-            with factory() as db:
-                assert db.scalar(select(func.count()).select_from(Job)) == before_count
-                assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260906_0004"
+        with factory() as db:
+            assert not db.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0005"
         engine.dispose()

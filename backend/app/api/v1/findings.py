@@ -10,6 +10,8 @@ from app.db.session import get_db
 from app.findings.schemas import FindingEvidenceResponse, FindingPage, FindingResponse
 from app.findings.service import FindingNotFoundError, FindingProvenanceError, get_finding, list_findings, resolve_evidence
 from app.ingestion.storage import ArtifactStorage, get_artifact_storage
+from app.remediation.schemas import RemediationPreviewRequest
+from app.remediation.service import RemediationError, get_remediation, preview_remediation
 
 router = APIRouter(tags=["findings"])
 
@@ -34,3 +36,14 @@ def finding_detail(finding_id: UUID, user: Annotated[User, Depends(get_current_u
 def finding_evidence(finding_id: UUID, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)], storage: Annotated[ArtifactStorage, Depends(get_artifact_storage)]):
     try: return resolve_evidence(db,user,finding_id,storage)
     except (FindingNotFoundError,FindingProvenanceError) as error: raise _error(error) from None
+
+@router.get("/findings/{finding_id}/remediation")
+def remediation(finding_id: UUID, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+    try: return get_remediation(db, user, finding_id)
+    except FindingNotFoundError as error: raise _error(error) from None
+
+@router.post("/findings/{finding_id}/remediation/preview")
+def remediation_preview(finding_id: UUID, request: RemediationPreviewRequest, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+    try: return preview_remediation(db, user, finding_id, request.parameters)
+    except FindingNotFoundError as error: raise _error(error) from None
+    except RemediationError as error: raise HTTPException(422, "Remediation parameters are invalid") from error

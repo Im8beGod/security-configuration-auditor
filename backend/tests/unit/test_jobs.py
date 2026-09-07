@@ -15,7 +15,7 @@ from app.jobs.service import claim_next_job, complete_job, enqueue_job, fail_job
 
 EXPECTED_TABLES = {
     "artifacts", "audits", "devices", "effective_states", "findings", "jobs", "organizations", "security_facts",
-    "snapshots", "users"
+    "snapshots", "users", "remediation_procedures"
 }
 
 

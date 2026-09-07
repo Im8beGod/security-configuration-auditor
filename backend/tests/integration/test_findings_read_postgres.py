@@ -17,7 +17,7 @@ from app.db.models import (
     AuditReevaluationReason, AuditStatus, Device, EffectiveState, FactState,
     FactValidationStatus, Finding, InterpretationConfidence, InterpretationMethod,
     Organization, SecurityFact, Snapshot, SnapshotGroupingStatus, SnapshotSource,
-    SnapshotStatus, User,
+    SnapshotStatus, User, RemediationProcedure, RemediationProcedureStatus,
 )
 from app.db.session import create_session_factory, get_db
 from app.effective_state import ResolutionStatus, UnresolvedReason
@@ -44,9 +44,8 @@ def _audit(organization_id, device_id, snapshot_id, user_id, revision):
     return Audit(
         organization_id=organization_id, device_id=device_id, snapshot_id=snapshot_id,
         revision_number=revision, reevaluation_reason=AuditReevaluationReason.INITIAL,
-        status=AuditStatus.PROCESSING, selected_frameworks=[], version_refs={
-            "knowledge_pack_version_id": "pinned",
-        }, profile_resolution={"resolution_status": "resolved"}, verdict_counts={},
+        status=AuditStatus.PROCESSING, selected_frameworks=[], version_refs={"device_profile_version_id": "cisco.ios_xe.17@1.0.0"},
+        profile_resolution={"resolution_status": "resolved", "profile_version_id": "cisco.ios_xe.17@1.0.0"}, verdict_counts={},
         severity_counts={}, coverage={}, created_by=user_id,
     )
 
@@ -69,6 +68,7 @@ def _finding(audit, key, *, verdict=FindingVerdict.FAIL, severity=FindingSeverit
 def _cleanup(db, organization_ids):
     audit_ids = select(Audit.audit_id).where(Audit.organization_id.in_(organization_ids))
     db.execute(delete(Finding).where(Finding.audit_id.in_(audit_ids)))
+    db.execute(delete(RemediationProcedure))
     db.execute(delete(EffectiveState).where(EffectiveState.audit_id.in_(audit_ids)))
     db.execute(delete(SecurityFact).where(SecurityFact.audit_id.in_(audit_ids)))
     db.execute(delete(Audit).where(Audit.organization_id.in_(organization_ids)))
@@ -77,6 +77,76 @@ def _cleanup(db, organization_ids):
     db.execute(delete(Device).where(Device.organization_id.in_(organization_ids)))
     db.execute(delete(User).where(User.organization_id.in_(organization_ids)))
     db.execute(delete(Organization).where(Organization.organization_id.in_(organization_ids)))
+
+
+def _procedure(rule_id, *, status=RemediationProcedureStatus.PUBLISHED, profile="cisco.ios_xe.17@1.0.0"):
+    return RemediationProcedure(procedure_key=f"test.{uuid4()}", version=1, rule_id=rule_id,
+        title="Synthetic recommendation", security_objective="test", description="test only", status=status,
+        profile_applicability={"profile_version_ids": [profile]}, prerequisites=[], safety_warnings=[],
+        required_parameters=[{"name": "network", "type": "ip_network", "required": True}], configuration_context=[],
+        ordered_steps=[{"text": "synthetic network {network}"}], verification_steps=[], rollback_steps=[],
+        validation_results=[{"result": "synthetic"}], source_references=[{"source": "synthetic"}])
+
+
+def test_remediation_api_registry_preview_and_fail_closed_postgres(tmp_path):
+    settings = get_settings().model_copy(update={"api_prefix": "/api/v1", "auth_cookie_name": "step9_test", "auth_cookie_secure": False})
+    engine = create_database_engine(settings); factory = create_session_factory(engine); organizations = []
+    try:
+        suffix = uuid4().hex
+        org, user_id = bootstrap_admin(factory, "Step 9", f"step9-{suffix}", f"step9-{suffix}@example.invalid", "test-only-password")
+        other, _ = bootstrap_admin(factory, "Step 9 Other", f"step9-other-{suffix}", f"step9-other-{suffix}@example.invalid", "test-only-password")
+        organizations.extend((org, other))
+        with factory.begin() as db:
+            device = Device(organization_id=org, display_name="Step 9 device"); db.add(device); db.flush()
+            snapshot = _snapshot(org, device.device_id, user_id, f"step9-{suffix}"); db.add(snapshot); db.flush()
+            audit = _audit(org, device.device_id, snapshot.snapshot_id, user_id, 1); db.add(audit); db.flush()
+            finding = _finding(audit, "step9-fail"); unknown = _finding(audit, "step9-unknown", verdict=FindingVerdict.UNKNOWN, severity=FindingSeverity.LOW, unknown_reason=UnresolvedReason.MISSING_EVIDENCE)
+            procedure = _procedure(finding.rule_id); db.add_all((finding, unknown, procedure)); db.flush()
+            finding_id, unknown_id, audit_id, procedure_id = finding.finding_id, unknown.finding_id, audit.audit_id, procedure.procedure_id
+            before_finding = (finding.verdict, finding.explanation, finding.remediation_procedure_id, finding.created_at)
+            before_audit = (audit.status, audit.processing_stage, audit.version_refs, audit.profile_resolution, audit.completed_at)
+        app = create_app(settings)
+        def dependency():
+            with factory() as db: yield db
+        app.dependency_overrides[get_db] = dependency
+        app.dependency_overrides[get_settings] = lambda: settings
+        app.dependency_overrides[get_artifact_storage] = lambda: LocalFilesystemArtifactStorage(tmp_path / "artifacts")
+        with TestClient(app) as client:
+            assert client.post("/api/v1/auth/login", json={"email": f"step9-{suffix}@example.invalid", "password": "test-only-password"}).status_code == 200
+            get = client.get(f"/api/v1/findings/{finding_id}/remediation"); assert get.status_code == 200
+            assert get.json()["procedure_id"] == str(procedure_id) and get.json()["selection_source"] == "published_registry_resolution"
+            preview = client.post(f"/api/v1/findings/{finding_id}/remediation/preview", json={"parameters": {"network": "192.0.2.3/24"}})
+            assert preview.status_code == 200 and preview.json()["rendered_steps"] == ["synthetic network 192.0.2.0/24"]
+            assert client.post(f"/api/v1/findings/{finding_id}/remediation/preview", json={"parameters": {"network": "bad"}}).status_code == 422
+            assert client.get(f"/api/v1/findings/{unknown_id}/remediation").json()["status"] == "not_required"
+            with factory.begin() as db:
+                audit_row = db.get(Audit, audit_id)
+                ambiguous = _finding(audit_row, "step9-ambiguous"); ambiguous.rule_id = "synthetic.ambiguous"
+                first = _procedure(ambiguous.rule_id); second = _procedure(ambiguous.rule_id)
+                pinned = _finding(audit_row, "step9-pinned"); pinned.rule_id = "synthetic.pinned"
+                pinned_a = _procedure(pinned.rule_id); pinned_a.procedure_id = uuid4(); pinned_b = _procedure(pinned.rule_id); pinned.remediation_procedure_id = pinned_a.procedure_id
+                invalid_pin = _finding(audit_row, "step9-invalid-pin"); invalid_pin.rule_id = "synthetic.invalid-pin"
+                incompatible = _procedure(invalid_pin.rule_id, profile="other.profile@1"); incompatible.procedure_id = uuid4(); matching = _procedure(invalid_pin.rule_id); invalid_pin.remediation_procedure_id = incompatible.procedure_id
+                db.add_all((ambiguous, first, second, pinned, pinned_a, pinned_b, invalid_pin, incompatible, matching)); db.flush()
+                ambiguous_id, pinned_id, invalid_pin_id = ambiguous.finding_id, pinned.finding_id, invalid_pin.finding_id
+                pinned_a_id = pinned_a.procedure_id
+            ambiguous_response = client.get(f"/api/v1/findings/{ambiguous_id}/remediation").json()
+            assert ambiguous_response["status"] == "unavailable" and ambiguous_response["reason"] == "ambiguous_procedure"
+            pinned_response = client.get(f"/api/v1/findings/{pinned_id}/remediation").json()
+            assert pinned_response["procedure_id"] == str(pinned_a_id) and pinned_response["selection_source"] == "explicit_finding_reference"
+            invalid_response = client.get(f"/api/v1/findings/{invalid_pin_id}/remediation").json()
+            assert invalid_response["status"] == "unavailable" and invalid_response["reason"] == "unsupported_profile"
+            client.cookies.clear(); assert client.post("/api/v1/auth/login", json={"email": f"step9-other-{suffix}@example.invalid", "password": "test-only-password"}).status_code == 200
+            assert client.get(f"/api/v1/findings/{finding_id}/remediation").status_code == 404
+            assert client.post(f"/api/v1/findings/{finding_id}/remediation/preview", json={"parameters": {}}).status_code == 404
+        with factory() as db:
+            persisted_finding = db.get(Finding, finding_id); persisted_audit = db.get(Audit, audit_id)
+            assert (persisted_finding.verdict, persisted_finding.explanation, persisted_finding.remediation_procedure_id, persisted_finding.created_at) == before_finding
+            assert (persisted_audit.status, persisted_audit.processing_stage, persisted_audit.version_refs, persisted_audit.profile_resolution, persisted_audit.completed_at) == before_audit
+    finally:
+        if organizations:
+            with factory.begin() as db: _cleanup(db, organizations)
+        engine.dispose()
 
 
 def test_findings_read_api_preserves_canonical_values_and_fails_closed(tmp_path):
@@ -90,7 +160,7 @@ def test_findings_read_api_preserves_canonical_values_and_fails_closed(tmp_path)
     organization_ids = []
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0007"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0008"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(factory, "Step 8 Read", f"step8-read-{suffix}", f"step8-read-{suffix}@example.invalid", "test-only-password")
         other_organization_id, _ = bootstrap_admin(factory, "Step 8 Other", f"step8-other-{suffix}", f"step8-other-{suffix}@example.invalid", "test-only-password")

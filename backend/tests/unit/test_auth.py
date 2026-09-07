@@ -241,6 +241,8 @@ def test_api_surface_and_configured_prefix(auth_settings):
             "/api/test/audits/{audit_id}/findings": {"get"},
             "/api/test/findings/{finding_id}": {"get"},
             "/api/test/findings/{finding_id}/evidence": {"get"},
+            "/api/test/findings/{finding_id}/remediation": {"get"},
+            "/api/test/findings/{finding_id}/remediation/preview": {"post"},
         "/api/test/devices": {"get", "post"},
         "/api/test/devices/{device_id}": {"get", "patch"},
         "/api/test/devices/{device_id}/snapshots": {"get", "post"},

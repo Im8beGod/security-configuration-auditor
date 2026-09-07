@@ -136,3 +136,11 @@ export interface Audit {
   schema_version: string
   job: JobSummary | null
 }
+
+export interface ReevaluationEligibility {
+  eligible: boolean
+  reason: string | null
+  source_audit_id: string
+  source_revision_number: number
+  candidates: Array<{ knowledge_pack_version_id: string; knowledge_pack_id: string; version: number; published_at: string }>
+}

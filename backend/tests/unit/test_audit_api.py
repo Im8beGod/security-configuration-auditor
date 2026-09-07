@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 
 from app.cli.bootstrap_admin import bootstrap_admin
 from app.core.config import get_settings
-from app.db.models import Audit, AuditStatus, Job, JobStatus, JobType, Snapshot, SnapshotStatus
+from app.db.models import Audit, AuditStatus, Job, JobStatus, JobType, Snapshot, SnapshotStatus, User, UserRole
 from app.db.session import get_db
 from app.ingestion.storage import LocalFilesystemArtifactStorage, get_artifact_storage
 from app.jobs.errors import JobError
@@ -206,3 +206,14 @@ def test_current_worker_leaves_created_audit_job_queued(audit_context):
         job = db.get(Job, job_id)
         assert job.status == JobStatus.QUEUED
         assert job.attempt_count == 0 and job.started_at is None
+
+
+def test_analyst_cannot_start_reevaluation(audit_context):
+    client, factory, _, (_, user_id), _ = audit_context
+    login(client)
+    _, snapshot, _ = ready_snapshot(client)
+    audit = create_audit(client, snapshot["snapshot_id"]).json()
+    with factory.begin() as db:
+        db.get(User, user_id).role = UserRole.ANALYST
+    response = client.post(f"/api/v1/audits/{audit['audit_id']}/re-evaluate", json={"knowledge_pack_version_id": str(uuid4())})
+    assert response.status_code == 403

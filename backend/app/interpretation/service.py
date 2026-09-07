@@ -23,6 +23,9 @@ from app.db.models import (
     Snapshot,
     SnapshotStatus,
     UnresolvedBlock,
+    KnowledgePackRecord,
+    KnowledgePackVersionRecord,
+    MappingVersion,
 )
 from app.ingestion.storage import ArtifactStorage
 from app.interpretation.exceptions import (
@@ -30,11 +33,12 @@ from app.interpretation.exceptions import (
     InterpretationNotFoundError,
     InterpretationValidationError,
 )
-from app.interpretation.extractors import EXTRACTORS
+from app.interpretation.extractors import EXTRACTORS, ExtractionOutcome
 from app.interpretation.knowledge_pack import (
     DeclarativeMapping,
     KnowledgePack,
     NegationBehavior,
+    NodeMatcher,
     validate_knowledge_pack,
 )
 from app.interpretation.models import (
@@ -66,6 +70,7 @@ from app.security_model import (
     get_field,
     validate_field_value_scope,
 )
+from app.training.dsl import MappingDefinition, ValidationNode, extract as extract_training, matches as matches_training
 
 
 KNOWLEDGE_PACKS = {
@@ -128,6 +133,60 @@ def load_validated_knowledge_pack_by_version(
         raise InterpretationValidationError(
             "knowledge_pack_invalid", "Knowledge pack validation failed"
         ) from None
+
+
+def load_published_knowledge_pack(
+    db: Session, organization_id: UUID, knowledge_pack_version_id: UUID, profile_version_id: str
+) -> KnowledgePack:
+    """Load an immutable, administrator-published Step 11 pack through the bounded DSL."""
+    version = db.scalar(select(KnowledgePackVersionRecord).where(
+        KnowledgePackVersionRecord.knowledge_pack_version_id == knowledge_pack_version_id,
+        KnowledgePackVersionRecord.organization_id == organization_id,
+    ))
+    if version is None:
+        return load_validated_knowledge_pack_by_version(knowledge_pack_version_id)
+    record = db.get(KnowledgePackRecord, version.knowledge_pack_id)
+    profile = PROFILE_REGISTRY.get(profile_version_id)
+    if record is None or profile is None or not version.mapping_version_ids:
+        raise InterpretationValidationError("knowledge_pack_unavailable", "No compatible knowledge pack is available")
+    try:
+        ids = [UUID(value) for value in version.mapping_version_ids]
+    except (TypeError, ValueError):
+        raise InterpretationValidationError("knowledge_pack_invalid", "Knowledge pack validation failed") from None
+    rows = list(db.scalars(select(MappingVersion).where(
+        MappingVersion.mapping_version_id.in_(ids), MappingVersion.organization_id == organization_id
+    )))
+    if len(rows) != len(ids):
+        raise InterpretationValidationError("knowledge_pack_invalid", "Knowledge pack validation failed")
+    # Step 11 publications add reviewed mappings to the profile's sealed baseline;
+    # they never silently discard existing canonical interpretation coverage.
+    baseline = load_validated_knowledge_pack(profile_version_id)
+    mappings = (*baseline.mappings, *tuple(_training_mapping(row, profile_version_id) for row in sorted(rows, key=lambda row: str(row.mapping_version_id))))
+    pack = KnowledgePack(record.knowledge_pack_id, version.knowledge_pack_version_id, record.name,
+        str(version.version), version.schema_version, profile.profile_id, profile_version_id, mappings)
+    try:
+        return validate_knowledge_pack(pack, expected_profile_id=profile.profile_id,
+            expected_profile_version_id=profile_version_id, allowed_extractors=frozenset(EXTRACTORS), scope_resolver_types=SCOPE_RESOLVER_TYPES)
+    except ValueError:
+        raise InterpretationValidationError("knowledge_pack_invalid", "Knowledge pack validation failed") from None
+
+
+def _training_mapping(row: MappingVersion, profile_version_id: str) -> DeclarativeMapping:
+    definition = MappingDefinition.model_validate({
+        "profile_applicability": row.profile_applicability, "structural_match": row.structural_match,
+        "target_field_id": row.target_field_id, "value_extraction": row.value_extraction,
+        "unit_conversion": row.unit_conversion, "scope_resolution": row.scope_resolution,
+        "negation_behavior": row.negation_behavior, "removal_behavior": row.removal_behavior,
+        "default_behavior": row.default_behavior, "examples": row.examples,
+    })
+    if profile_version_id not in definition.profile_applicability.profile_version_ids or definition.scope_resolution.strategy not in SCOPE_RESOLVERS:
+        raise InterpretationValidationError("knowledge_pack_incompatible", "Knowledge Pack is incompatible with this audit")
+    behavior = NegationBehavior(definition.negation_behavior.operation) if definition.negation_behavior.operation in {item.value for item in NegationBehavior} else NegationBehavior.UNSUPPORTED
+    return DeclarativeMapping(row.mapping_id, row.mapping_version_id, row.target_field_id,
+        NodeMatcher(command=definition.structural_match.command, parent_command=definition.structural_match.parent_command),
+        "training_dsl", definition.scope_resolution.strategy,
+        frozenset({TypedValueType(definition.value_extraction.output_type)}), behavior,
+        training_definition=definition.model_dump(mode="json"))
 
 
 def interpret_structural_ir(
@@ -196,7 +255,7 @@ def interpret_structural_ir(
                     "uncertain_structural_node", node.node_id, mapping.mapping_id,
                 )
                 continue
-            extraction = EXTRACTORS[mapping.extractor](node)
+            extraction = _extract_mapping(mapping, node, ir)
             if extraction.value is None:
                 if extraction.diagnostic_code is not None:
                     _add_diagnostic(
@@ -258,6 +317,7 @@ def interpret_audit(
     organization_id: UUID,
     *,
     before_interpret: Callable[[], None] | None = None,
+    knowledge_pack: KnowledgePack | None = None,
 ) -> AuditInterpretationResult:
     audit = db.scalar(select(Audit).where(
         Audit.audit_id == audit_id,
@@ -296,11 +356,13 @@ def interpret_audit(
             "audit_profile_incompatible", "Audit has no compatible resolved profile"
         )
     pinned_pack_id = audit.version_refs.get("knowledge_pack_version_id")
-    if pinned_pack_id is None:
+    if knowledge_pack is not None:
+        pack = knowledge_pack
+    elif pinned_pack_id is None:
         pack = load_validated_knowledge_pack(profile_version_id)
     else:
         try:
-            pack = load_validated_knowledge_pack_by_version(UUID(pinned_pack_id))
+            pack = load_published_knowledge_pack(db, organization_id, UUID(pinned_pack_id), profile_version_id)
         except (TypeError, ValueError):
             raise InterpretationValidationError(
                 "knowledge_pack_version_conflict", "Audit knowledge-pack version is incompatible"
@@ -479,6 +541,14 @@ def list_audit_security_facts(
 
 
 def _matches(mapping: DeclarativeMapping, node: ConfigNode, ir: StructuralIR) -> bool:
+    if mapping.training_definition is not None:
+        parent = ir.node(node.parent_id) if node.parent_id else None
+        definition = MappingDefinition.model_validate(mapping.training_definition)
+        return matches_training(definition, ValidationNode.model_validate({
+            "command": node.command, "arguments": list(node.arguments),
+            "parent_command": parent.command if parent else None, "ancestor_commands": [],
+            "scope_type": mapping.scope_resolver, "negated": node.negated,
+        }))[0]
     matcher = mapping.matcher
     if node.command != matcher.command or not _has_prefix(
         node.arguments, matcher.arguments_prefix
@@ -501,6 +571,22 @@ def _has_prefix(arguments: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
     return tuple(item.lower() for item in arguments[:len(prefix)]) == tuple(
         item.lower() for item in prefix
     )
+
+
+def _extract_mapping(mapping: DeclarativeMapping, node: ConfigNode, ir: StructuralIR):
+    if mapping.training_definition is None:
+        return EXTRACTORS[mapping.extractor](node)
+    parent = ir.node(node.parent_id) if node.parent_id else None
+    definition = MappingDefinition.model_validate(mapping.training_definition)
+    matched, captures = matches_training(definition, ValidationNode.model_validate({
+        "command": node.command, "arguments": list(node.arguments),
+        "parent_command": parent.command if parent else None, "ancestor_commands": [],
+        "scope_type": mapping.scope_resolver, "negated": node.negated,
+    }))
+    if not matched:
+        return ExtractionOutcome(None, "training_mapping_mismatch")
+    value = extract_training(definition, captures)
+    return ExtractionOutcome(TypedValue(TypedValueType(definition.value_extraction.output_type), value))
 
 
 def _build_fact(

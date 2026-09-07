@@ -67,3 +67,16 @@ class AuditResponse(BaseModel):
     created_by: UUID | None
     schema_version: str
     job: JobSummary | None = None
+
+
+class ReevaluationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    knowledge_pack_version_id: UUID
+
+
+class ReevaluationEligibilityResponse(BaseModel):
+    eligible: bool
+    reason: str | None
+    source_audit_id: UUID
+    source_revision_number: int
+    candidates: list[dict[str, object]]

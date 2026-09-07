@@ -8,12 +8,13 @@ from app.audit.errors import (
     AuditConflictError, AuditInfrastructureError, AuditNotFoundError,
     AuditValidationError,
 )
-from app.audit.schemas import AuditCreate, AuditResponse, JobSummary
+from app.audit.schemas import AuditCreate, AuditResponse, JobSummary, ReevaluationEligibilityResponse, ReevaluationRequest
 from app.audit.service import (
     create_audit, get_audit, get_audit_job, list_audits, start_audit,
 )
-from app.auth.dependencies import get_current_user
-from app.db.models import Audit, User
+from app.reevaluation.service import eligibility as reevaluation_eligibility, history as reevaluation_history, start as start_reevaluation
+from app.auth.dependencies import get_current_user, require_roles
+from app.db.models import Audit, User, UserRole
 from app.db.session import get_db
 
 
@@ -94,4 +95,34 @@ def run_audit_endpoint(
         AuditNotFoundError, AuditConflictError, AuditValidationError,
         AuditInfrastructureError,
     ) as error:
+        raise _translate(error) from None
+
+
+@router.get("/{audit_id}/reevaluation-eligibility", response_model=ReevaluationEligibilityResponse)
+def reevaluation_eligibility_endpoint(audit_id: UUID, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+    try:
+        result = reevaluation_eligibility(db, user, audit_id)
+        return ReevaluationEligibilityResponse(
+            eligible=result.eligible, reason=result.reason, source_audit_id=result.source.audit_id,
+            source_revision_number=result.source.revision_number,
+            candidates=[{"knowledge_pack_version_id": item.knowledge_pack_version_id, "knowledge_pack_id": item.knowledge_pack_id, "version": item.version, "published_at": item.published_at} for item in result.candidates],
+        )
+    except AuditNotFoundError as error:
+        raise _translate(error) from None
+
+
+@router.get("/{audit_id}/revisions", response_model=list[AuditResponse])
+def audit_history_endpoint(audit_id: UUID, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+    try:
+        return [_response(db, item) for item in reevaluation_history(db, user, audit_id)]
+    except AuditNotFoundError as error:
+        raise _translate(error) from None
+
+
+@router.post("/{audit_id}/re-evaluate", response_model=AuditResponse, status_code=status.HTTP_201_CREATED)
+def reevaluate_audit_endpoint(audit_id: UUID, request: ReevaluationRequest, user: Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.MAPPING_ADMIN))], db: Annotated[Session, Depends(get_db)]):
+    try:
+        audit, job = start_reevaluation(db, user, audit_id, request.knowledge_pack_version_id)
+        return _response(db, audit, job)
+    except (AuditNotFoundError, AuditConflictError, AuditValidationError, AuditInfrastructureError) as error:
         raise _translate(error) from None

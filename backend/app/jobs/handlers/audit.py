@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.audit.errors import AuditWorkflowError
 from app.audit.pipeline import AuditPipelineCoordinator
 from app.compliance.service import ComplianceError
-from app.db.models import Audit, Job, JobType
+from app.db.models import Audit, AuditStatus, Job, JobType
 from app.effective_state.exceptions import EffectiveStateError
 from app.ingestion.storage import ArtifactStorage
 from app.interpretation import InterpretationWorkflowError
@@ -32,7 +32,7 @@ class AuditJobHandler:
             ).one_or_none()
             if (
                 identity is None
-                or identity.job_type != JobType.AUDIT
+                or identity.job_type not in {JobType.AUDIT, JobType.RE_EVALUATION}
                 or identity.audit_id is None
             ):
                 raise JobError("Audit Job reference is invalid")
@@ -48,6 +48,11 @@ class AuditJobHandler:
                 raise JobError("Audit Job reference is inconsistent")
             audit_id = identity.audit_id
             organization_id = audit_identity.organization_id
+
+            if audit_identity and db.scalar(select(Audit.status).where(Audit.audit_id == audit_id)) in {
+                AuditStatus.COMPLETED, AuditStatus.COMPLETED_WITH_UNKNOWNS, AuditStatus.COMPLETED_WITH_ERRORS
+            }:
+                return
 
         try:
             AuditPipelineCoordinator(self.factory, self.storage).run(

@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Audit, Device, SecurityFact, Snapshot
+from app.db.models import Audit, Device, SecurityFact, Snapshot, KnowledgePackVersionRecord, MappingStatus, MappingVersion
 from app.db.models.effective_state import EffectiveState
 from app.effective_state.exceptions import (
     EffectiveStateNotFoundError,
@@ -19,10 +19,11 @@ from app.effective_state.models import (
     validate_effective_state_draft,
 )
 from app.effective_state.policy import (
-    get_field_policy,
+    FactOperation, MappingOperationPolicy, get_field_policy,
     get_mapping_operation_policy,
     validate_policy_metadata,
 )
+from app.training.dsl import MappingDefinition
 from app.effective_state.resolver import resolve_security_facts
 from app.profile_resolution import PROFILE_REGISTRY
 from app.security_model import TypedValueType, validate_field_value_scope
@@ -65,9 +66,7 @@ def validate_resolver_facts(
             raise EffectiveStateValidationError("SecurityFact knowledge-pack pin is incompatible")
         scope = scope_from_dict(fact.scope)
         value = typed_value_from_dict(fact.value)
-        operation = get_mapping_operation_policy(
-            fact.knowledge_pack_version_id, fact.mapping_version_id, fact.field_id
-        )
+        operation = _operation_policy(db, audit, fact)
         if value.type is TypedValueType.NULL:
             if operation.operation.value != "reset":
                 raise EffectiveStateValidationError("SecurityFact null value is unsupported")
@@ -142,9 +141,8 @@ def resolve_audit_effective_states(
     audit = validate_resolver_facts(
         db, audit_id=audit_id, organization_id=organization_id, facts=facts
     )
-    drafts = resolve_security_facts(
-        audit_id=audit.audit_id, device_id=audit.device_id, facts=facts
-    )
+    operations = {fact.fact_id: _operation_policy(db, audit, fact).operation for fact in facts}
+    drafts = resolve_security_facts(audit_id=audit.audit_id, device_id=audit.device_id, facts=facts, operations=operations)
     existing = tuple(db.scalars(select(EffectiveState).where(
         EffectiveState.audit_id == audit_id
     )))
@@ -163,3 +161,31 @@ def resolve_audit_effective_states(
     for state in states:
         db.expunge(state)
     return states
+
+
+def _operation_policy(db: Session, audit: Audit, fact: SecurityFact) -> MappingOperationPolicy:
+    """Resolve static policies first, then exact immutable Step 11 pack membership."""
+    try:
+        return get_mapping_operation_policy(fact.knowledge_pack_version_id, fact.mapping_version_id, fact.field_id)
+    except EffectiveStateValidationError:
+        pass
+    if fact.mapping_version_id is None or str(fact.knowledge_pack_version_id) != audit.version_refs.get("knowledge_pack_version_id"):
+        raise EffectiveStateValidationError("SecurityFact mapping provenance is incompatible")
+    pack = db.scalar(select(KnowledgePackVersionRecord).where(
+        KnowledgePackVersionRecord.knowledge_pack_version_id == fact.knowledge_pack_version_id,
+        KnowledgePackVersionRecord.organization_id == audit.organization_id,
+    ))
+    mapping = db.scalar(select(MappingVersion).where(
+        MappingVersion.mapping_version_id == fact.mapping_version_id,
+        MappingVersion.organization_id == audit.organization_id,
+    ))
+    if pack is None or mapping is None or str(mapping.mapping_version_id) not in pack.mapping_version_ids or mapping.status not in {MappingStatus.PUBLISHED, MappingStatus.SUPERSEDED} or mapping.target_field_id != fact.field_id:
+        raise EffectiveStateValidationError("SecurityFact mapping provenance is incompatible")
+    try:
+        definition = MappingDefinition.model_validate({"profile_applicability": mapping.profile_applicability, "structural_match": mapping.structural_match, "target_field_id": mapping.target_field_id, "value_extraction": mapping.value_extraction, "unit_conversion": mapping.unit_conversion, "scope_resolution": mapping.scope_resolution, "negation_behavior": mapping.negation_behavior, "removal_behavior": mapping.removal_behavior, "default_behavior": mapping.default_behavior, "examples": mapping.examples})
+    except ValueError:
+        raise EffectiveStateValidationError("SecurityFact mapping definition is invalid") from None
+    if definition.target_field_id != fact.field_id:
+        raise EffectiveStateValidationError("SecurityFact mapping provenance is incompatible")
+    operation = FactOperation.RESET if fact.value.get("type") == "null" and definition.negation_behavior.operation == "reset_to_default" else FactOperation.ASSIGN
+    return MappingOperationPolicy(fact.knowledge_pack_version_id, mapping.mapping_version_id, fact.field_id, operation)

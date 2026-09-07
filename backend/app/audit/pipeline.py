@@ -16,6 +16,7 @@ from app.audit.service import resolve_audit_profile
 from app.compliance.policy import PolicyRegistryError, select_policy_version
 from app.compliance.rule_registry import RULE_PACK, RULE_REGISTRY, RuleRegistryError
 from app.compliance.service import ComplianceError, persist_audit_findings
+from app.compliance.verdicts import FindingVerdict
 from app.db.models import Audit, AuditProcessingStage, AuditStatus, EffectiveState, Finding
 from app.db.models.common import utc_now
 from app.ingestion.storage import ArtifactStorage
@@ -24,9 +25,9 @@ from app.interpretation import (
     interpret_audit,
     load_validated_knowledge_pack,
 )
-from app.interpretation.service import load_validated_knowledge_pack_by_version
+from app.interpretation.service import load_published_knowledge_pack
 from app.effective_state.service import resolve_audit_effective_states
-from app.profile_resolution import ProfileResolutionResult, ResolutionStatus
+from app.profile_resolution import ProfileResolutionResult, ResolutionStatus, ResolutionConfidence
 
 
 @dataclass(frozen=True)
@@ -54,9 +55,13 @@ class AuditPipelineCoordinator:
         self._begin_processing(audit_id, organization_id)
 
         with self._factory() as db:
-            resolution = resolve_audit_profile(
-                db, self._storage, audit_id, organization_id
-            )
+            audit = db.scalar(select(Audit).where(Audit.audit_id == audit_id, Audit.organization_id == organization_id))
+            if audit is None:
+                raise AuditNotFoundError("audit_not_found", "Audit not found")
+            resolution = self._pinned_resolution(audit)
+        if resolution is None:
+            with self._factory() as db:
+                resolution = resolve_audit_profile(db, self._storage, audit_id, organization_id)
         if (
             resolution.resolution_status != ResolutionStatus.RESOLVED
             or resolution.selected_profile_version_id is None
@@ -92,6 +97,7 @@ class AuditPipelineCoordinator:
                 audit_id,
                 organization_id,
                 before_interpret=begin_interpreting,
+                knowledge_pack=pack,
             )
         self._pin_versions_and_set_stage(
             audit_id,
@@ -132,6 +138,7 @@ class AuditPipelineCoordinator:
                 organization_policy=policy, effective_states=persisted_states,
             )
             self._commit(db, "finding_persistence_failed")
+        self._finalize(audit_id, organization_id, findings)
         return AuditPipelineResult(
             resolution, interpretation, effective_states, findings, tuple(stages)
         )
@@ -168,6 +175,34 @@ class AuditPipelineCoordinator:
             audit.processing_stage = AuditProcessingStage.EVALUATING
             self._commit(db, "audit_pipeline_checkpoint_failed")
 
+    def _finalize(self, audit_id: UUID, organization_id: UUID, findings: tuple[Finding, ...]) -> None:
+        """Persist the already-modelled terminal state after successful deterministic evaluation."""
+        verdict_counts: dict[str, int] = {}
+        severity_counts: dict[str, int] = {}
+        for finding in findings:
+            verdict_counts[finding.verdict.value] = verdict_counts.get(finding.verdict.value, 0) + 1
+            severity_counts[finding.severity.value] = severity_counts.get(finding.severity.value, 0) + 1
+        if verdict_counts.get(FindingVerdict.PROCESS_ERROR.value):
+            terminal = AuditStatus.COMPLETED_WITH_ERRORS
+        elif any(verdict_counts.get(value) for value in (FindingVerdict.UNKNOWN.value, FindingVerdict.MANUAL_REVIEW.value)):
+            terminal = AuditStatus.COMPLETED_WITH_UNKNOWNS
+        else:
+            terminal = AuditStatus.COMPLETED
+        with self._factory() as db:
+            audit = db.scalar(select(Audit).where(
+                Audit.audit_id == audit_id, Audit.organization_id == organization_id
+            ).with_for_update())
+            if audit is None:
+                raise AuditNotFoundError("audit_not_found", "Audit not found")
+            if audit.status is not AuditStatus.PROCESSING:
+                raise AuditConflictError("audit_not_processing", "Audit is not processing")
+            audit.processing_stage = AuditProcessingStage.FINALIZING
+            audit.verdict_counts = verdict_counts
+            audit.severity_counts = severity_counts
+            audit.status = terminal
+            audit.completed_at = utc_now()
+            self._commit(db, "audit_finalization_failed")
+
     def _load_audit_pack(
         self, audit_id: UUID, organization_id: UUID, profile_version_id: str
     ):
@@ -181,7 +216,8 @@ class AuditPipelineCoordinator:
         if pinned is None:
             return load_validated_knowledge_pack(profile_version_id)
         try:
-            pack = load_validated_knowledge_pack_by_version(UUID(pinned))
+            with self._factory() as db:
+                pack = load_published_knowledge_pack(db, organization_id, UUID(pinned), profile_version_id)
         except (TypeError, ValueError):
             raise AuditConflictError(
                 "audit_version_conflict", "Audit processing versions are already pinned differently"
@@ -191,6 +227,27 @@ class AuditPipelineCoordinator:
                 "audit_version_conflict", "Audit processing versions are already pinned differently"
             )
         return pack
+
+    @staticmethod
+    def _pinned_resolution(audit: Audit) -> ProfileResolutionResult | None:
+        """Re-evaluation retains the source's resolved profile; it never re-identifies evidence."""
+        if audit.reevaluation_reason.value == "initial":
+            return None
+        data = audit.profile_resolution
+        profile_id, profile_version_id = data.get("profile_id"), data.get("profile_version_id")
+        if not isinstance(profile_id, str) or not isinstance(profile_version_id, str):
+            raise AuditConflictError("audit_profile_missing", "Re-evaluation source profile is unavailable")
+        try:
+            status = ResolutionStatus(data.get("resolution_status"))
+            confidence = ResolutionConfidence(data.get("confidence"))
+        except ValueError:
+            raise AuditConflictError("audit_profile_invalid", "Re-evaluation source profile is invalid") from None
+        return ProfileResolutionResult(
+            vendor=data.get("vendor"), product_family=data.get("product_family"), os=data.get("os"),
+            os_version=data.get("os_version"), model=data.get("model"), serial_number=data.get("serial_number"),
+            device_class=None, selected_profile_id=profile_id, selected_profile_version_id=profile_version_id,
+            confidence=confidence, resolution_status=status, supporting_signals=(), unresolved_reasons=(), conflicts=(),
+        )
 
     def _begin_processing(self, audit_id: UUID, organization_id: UUID) -> None:
         with self._factory() as db:

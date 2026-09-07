@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
 from app.security_model import FIELD_REGISTRY, TypedValueType
@@ -45,6 +46,7 @@ class DeclarativeMapping:
     negation_behavior: NegationBehavior = NegationBehavior.UNSUPPORTED
     reset_mapping_version_id: UUID | None = None
     removal_mapping_version_id: UUID | None = None
+    training_definition: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +106,7 @@ def validate_knowledge_pack(
         field = FIELD_REGISTRY.get(mapping.field_id)
         if field is None:
             raise KnowledgePackValidationError("Mapping references unknown canonical field")
-        if mapping.extractor not in allowed_extractors:
+        if mapping.extractor not in allowed_extractors and mapping.extractor != "training_dsl":
             raise KnowledgePackValidationError("Mapping references unknown extractor")
         scope_type = scope_resolver_types.get(mapping.scope_resolver)
         if scope_type is None:

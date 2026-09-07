@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import delete, func, select, text
 
-from app.audit.errors import AuditNotFoundError
+from app.audit.errors import AuditConflictError, AuditNotFoundError
 from app.audit.pipeline import AuditPipelineCoordinator
 from app.cli.bootstrap_admin import bootstrap_admin
 from app.core.config import get_settings
@@ -41,7 +41,13 @@ from app.db.models import (
 from app.db.session import create_session_factory
 from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.jobs.errors import JobError
-from app.jobs.handlers import AuditJobHandler, handle_mapping_validation, handle_pdf_generation, handle_system_noop
+from app.jobs.handlers import (
+    AuditJobHandler,
+    handle_mapping_validation,
+    handle_pdf_generation,
+    handle_reevaluation,
+    handle_system_noop,
+)
 from app.jobs.runner import PRODUCTION_HANDLERS
 from app.jobs.service import enqueue_job
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
@@ -288,15 +294,15 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         with factory() as db:
             persisted = db.get(Audit, audit_id)
             started_at = persisted.started_at
-            assert persisted.status == AuditStatus.PROCESSING
-            assert persisted.processing_stage == AuditProcessingStage.EVALUATING
-            assert started_at is not None and persisted.completed_at is None
+            assert persisted.status == AuditStatus.COMPLETED_WITH_UNKNOWNS
+            assert persisted.processing_stage == AuditProcessingStage.FINALIZING
+            assert started_at is not None and persisted.completed_at is not None
             assert persisted.version_refs["device_profile_version_id"] == CISCO_IOS_XE_17.profile_version_id
             assert persisted.version_refs["knowledge_pack_version_id"] == str(CISCO_IOS_XE_17_KNOWLEDGE_PACK.knowledge_pack_version_id)
             assert persisted.version_refs["rule_pack_versions"] == ["e3763b76-edcd-55b8-9825-b82933a3e2f9"]
             assert persisted.version_refs["organization_policy_version_id"]
-            assert persisted.verdict_counts == {}
-            assert persisted.severity_counts == {}
+            assert persisted.verdict_counts
+            assert persisted.severity_counts
             assert persisted.coverage == {}
             assert db.get(Snapshot, supported_snapshot_id).status == SnapshotStatus.LOCKED
 
@@ -360,7 +366,9 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
                 EffectiveState
             ).where(EffectiveState.audit_id == audit_id))} == first_effective_state_ids
             assert {finding.finding_id for finding in db.scalars(select(Finding).where(Finding.audit_id == audit_id))} == first_finding_ids
-            assert retried.processing_stage == AuditProcessingStage.EVALUATING
+            assert retried.status == AuditStatus.COMPLETED_WITH_UNKNOWNS
+            assert retried.processing_stage == AuditProcessingStage.FINALIZING
+            assert retried.completed_at is not None
 
         for candidate_id, expected_status in (
             (unsupported_audit_id, ResolutionStatus.UNSUPPORTED),
@@ -396,7 +404,12 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         assert str(error.value) == "Audit Job reference is invalid"
 
         assert handle_system_noop(uuid4()) is None
-        assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation, JobType.MAPPING_VALIDATION: handle_mapping_validation}
+        assert PRODUCTION_HANDLERS == {
+            JobType.SYSTEM_NOOP: handle_system_noop,
+            JobType.PDF_GENERATION: handle_pdf_generation,
+            JobType.MAPPING_VALIDATION: handle_mapping_validation,
+            JobType.RE_EVALUATION: handle_reevaluation,
+        }
         assert "effective_states" in Base.metadata.tables
         assert "findings" in Base.metadata.tables
     finally:
@@ -472,9 +485,9 @@ def test_step7_pipeline_preserves_unknown_conflict_and_missing_state(tmp_path):
         with factory() as db:
             by_name = {name: db.get(Audit, audit_id) for name, audit_id in audits}
             for audit in by_name.values():
-                assert audit.status is AuditStatus.PROCESSING
-                assert audit.processing_stage is AuditProcessingStage.EVALUATING
-                assert audit.completed_at is None
+                assert audit.status is AuditStatus.COMPLETED_WITH_UNKNOWNS
+                assert audit.processing_stage is AuditProcessingStage.FINALIZING
+                assert audit.completed_at is not None
             unknown_audit = by_name["unknown"]
             unknown_state = db.scalar(select(EffectiveState).where(EffectiveState.audit_id == unknown_audit.audit_id, EffectiveState.field_id == "management.remote.ssh.version"))
             assert unknown_state.resolution_status.value == "unknown"
@@ -499,7 +512,9 @@ def test_step7_pipeline_preserves_unknown_conflict_and_missing_state(tmp_path):
             assert missing_finding.effective_state_refs == []
             first = {(item.finding_id, item.comparison_key, item.verdict, item.unknown_reason, tuple(item.effective_state_refs)) for item in db.scalars(select(Finding).where(Finding.audit_id == unknown_audit.audit_id))}
             started_at = unknown_audit.started_at
-        coordinator.run(by_name["unknown"].audit_id, organization_id)
+        with pytest.raises(AuditConflictError) as error:
+            coordinator.run(by_name["unknown"].audit_id, organization_id)
+        assert error.value.code == "audit_not_processable"
         with factory() as db:
             retried = db.get(Audit, by_name["unknown"].audit_id)
             second = {(item.finding_id, item.comparison_key, item.verdict, item.unknown_reason, tuple(item.effective_state_refs)) for item in db.scalars(select(Finding).where(Finding.audit_id == retried.audit_id))}

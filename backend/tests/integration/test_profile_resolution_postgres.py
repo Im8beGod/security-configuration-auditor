@@ -275,8 +275,18 @@ def test_profile_resolution_persists_atomically_with_tenant_and_snapshot_boundar
             handlers=PRODUCTION_HANDLERS,
             poll_interval_seconds=settings.worker_poll_interval_seconds,
         )
+        assert JobType.RE_EVALUATION in runtime.supported_job_types
         assert JobType.AUDIT not in runtime.supported_job_types
-        assert runtime.run_iteration() is False
+        queue_boundary_runtime = WorkerRuntime(
+            factory,
+            handlers={
+                job_type: handler
+                for job_type, handler in PRODUCTION_HANDLERS.items()
+                if job_type is not JobType.RE_EVALUATION
+            },
+            poll_interval_seconds=settings.worker_poll_interval_seconds,
+        )
+        assert queue_boundary_runtime.run_iteration() is False
         with factory() as db:
             queued_job = db.get(Job, job_id)
             assert queued_job.status == JobStatus.QUEUED

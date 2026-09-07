@@ -137,8 +137,22 @@ def test_step4_integrated_workflow_reaches_truthful_queue_boundary(tmp_path):
                 factory, handlers=PRODUCTION_HANDLERS,
                 poll_interval_seconds=settings.worker_poll_interval_seconds,
             )
-            assert runtime.supported_job_types == frozenset({JobType.SYSTEM_NOOP, JobType.PDF_GENERATION, JobType.MAPPING_VALIDATION})
-            assert [runtime.run_iteration() for _ in range(3)] == [False, False, False]
+            assert JobType.RE_EVALUATION in runtime.supported_job_types
+            queue_boundary_runtime = WorkerRuntime(
+                factory,
+                handlers={
+                    job_type: handler
+                    for job_type, handler in PRODUCTION_HANDLERS.items()
+                    if job_type is not JobType.RE_EVALUATION
+                },
+                poll_interval_seconds=settings.worker_poll_interval_seconds,
+            )
+            assert queue_boundary_runtime.supported_job_types == frozenset({
+                JobType.SYSTEM_NOOP,
+                JobType.PDF_GENERATION,
+                JobType.MAPPING_VALIDATION,
+            })
+            assert [queue_boundary_runtime.run_iteration() for _ in range(3)] == [False, False, False]
             assert client.post(
                 f"/api/v1/snapshots/{snapshot_id}/artifacts/{successful[1]['artifact_id']}"
             ).status_code == 409

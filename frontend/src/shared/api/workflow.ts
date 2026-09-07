@@ -1,4 +1,4 @@
-import type { Artifact, Audit, BulkUploadResponse, Device, DeviceCreate, JobSummary, Snapshot } from '../types/workflow'
+import type { Artifact, Audit, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
 import { apiRequest } from './client'
 
 export const workflowKeys = {
@@ -10,6 +10,8 @@ export const workflowKeys = {
   audits: ['audits'] as const,
   audit: (id: string) => ['audits', id] as const,
   job: (id: string) => ['jobs', id] as const,
+  revisions: (id: string) => ['audits', id, 'revisions'] as const,
+  reevaluation: (id: string) => ['audits', id, 'reevaluation-eligibility'] as const,
 }
 
 const json = (value: unknown) => JSON.stringify(value)
@@ -82,4 +84,16 @@ export async function runAudit(id: string): Promise<Audit> {
 
 export async function getJob(id: string): Promise<JobSummary> {
   return await apiRequest(`/jobs/${id}`) as JobSummary
+}
+
+export async function getReevaluationEligibility(id: string): Promise<ReevaluationEligibility> {
+  return await apiRequest(`/audits/${id}/reevaluation-eligibility`) as ReevaluationEligibility
+}
+
+export async function listAuditRevisions(id: string): Promise<Audit[]> {
+  return await apiRequest(`/audits/${id}/revisions`) as Audit[]
+}
+
+export async function reevaluateAudit(id: string, knowledgePackVersionId: string): Promise<Audit> {
+  return await apiRequest(`/audits/${id}/re-evaluate`, { method: 'POST', body: json({ knowledge_pack_version_id: knowledgePackVersionId }) }) as Audit
 }

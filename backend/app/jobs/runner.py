@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings, get_settings
 from app.db.session import get_session_factory
 from app.jobs.enums import JobType
-from app.jobs.handlers import handle_mapping_validation, handle_pdf_generation, handle_system_noop
+from app.jobs.handlers import handle_mapping_validation, handle_pdf_generation, handle_reevaluation, handle_system_noop
 from app.jobs.service import claim_next_job, complete_job, fail_job
 
 
@@ -22,6 +22,7 @@ PRODUCTION_HANDLERS: Mapping[JobType, JobHandler] = MappingProxyType(
         JobType.SYSTEM_NOOP: handle_system_noop,
         JobType.PDF_GENERATION: handle_pdf_generation,
         JobType.MAPPING_VALIDATION: handle_mapping_validation,
+        JobType.RE_EVALUATION: handle_reevaluation,
     }
 )
 HANDLER_FAILURE_CODE = "handler_failed"

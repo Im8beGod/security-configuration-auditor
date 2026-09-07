@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from itertools import groupby
-from typing import Iterable
+from typing import Iterable, Mapping
 from uuid import UUID
 
 from app.db.models import SecurityFact
@@ -35,12 +35,12 @@ class ClassifiedFact:
 
 
 def resolve_security_facts(
-    *, audit_id: UUID, device_id: UUID, facts: Iterable[SecurityFact]
+    *, audit_id: UUID, device_id: UUID, facts: Iterable[SecurityFact], operations: Mapping[UUID, FactOperation] | None = None
 ) -> tuple[EffectiveStateDraft, ...]:
     """Resolve valid persisted facts without configuration parsing or storage access."""
     source_facts = tuple(facts)
     blocked_dependencies = _blocked_dependency_ids(source_facts)
-    classified = tuple(_classify(fact) for fact in source_facts)
+    classified = tuple(_classify(fact, operations.get(fact.fact_id) if operations else None) for fact in source_facts)
     drafts: list[EffectiveStateDraft] = []
     for field_id, field_facts in groupby(
         sorted(classified, key=lambda item: (item.fact.field_id, item.scope.type, item.scope.key, str(item.fact.fact_id))),
@@ -98,12 +98,10 @@ def _blocked_dependency_ids(facts: tuple[SecurityFact, ...]) -> set[UUID]:
     return blocked
 
 
-def _classify(fact: SecurityFact) -> ClassifiedFact:
+def _classify(fact: SecurityFact, persisted_operation: FactOperation | None = None) -> ClassifiedFact:
     scope = scope_from_dict(fact.scope)
     value = typed_value_from_dict(fact.value)
-    operation = get_mapping_operation_policy(
-        fact.knowledge_pack_version_id, fact.mapping_version_id, fact.field_id
-    ).operation
+    operation = persisted_operation or get_mapping_operation_policy(fact.knowledge_pack_version_id, fact.mapping_version_id, fact.field_id).operation
     refs = fact.evidence_refs
     if not isinstance(refs, list) or not refs:
         raise EffectiveStateValidationError("SecurityFact ordering provenance is missing")

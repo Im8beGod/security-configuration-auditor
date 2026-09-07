@@ -47,12 +47,14 @@ CISCO_IOS_XE_17 = ProfileManifest(
     capabilities=frozenset({
         "profile_detection", "structural_parsing", "semantic_interpretation",
         "effective_state_resolution",
+        "deterministic_compliance",
     }),
     coverage_manifest=MappingProxyType({
         "profile_detection": True,
         "structural_parsing": True,
         "semantic_interpretation": True,
         "effective_state_resolution": True,
+        "deterministic_compliance": True,
         "supported_version_family": "IOS XE 17.x",
         "structural_reader": "indentation_cli.v1",
         "canonical_fields": (
@@ -74,7 +76,8 @@ CISCO_IOS_XE_17 = ProfileManifest(
             "incomplete Cisco grammar",
             "no documented defaults, inheritance, references, or bindings",
             "no inheritance, override, or conflict resolution",
-            "no compliance rules, Findings, or remediation",
+            "internal Cisco IOS XE technical baseline only (eight bounded rules)",
+            "no CIS, STIG, NIST, ISO mappings, remediation, or reporting",
         ),
     }),
 )

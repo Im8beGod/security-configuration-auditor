@@ -12,6 +12,7 @@ from app.db.models.audit import (
 )
 from app.db.models.device import Device, DeviceClass, DeviceIdentityStatus
 from app.db.models.effective_state import EffectiveState
+from app.db.models.finding import Finding
 from app.db.models.job import Job
 from app.db.models.organization import Organization
 from app.db.models.security_fact import (
@@ -43,6 +44,7 @@ __all__ = [
     "DeviceClass",
     "DeviceIdentityStatus",
     "EffectiveState",
+    "Finding",
     "Job",
     "JobStatus",
     "JobType",

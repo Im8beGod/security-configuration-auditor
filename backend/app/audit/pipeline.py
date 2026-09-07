@@ -13,7 +13,10 @@ from app.audit.errors import (
     AuditNotFoundError,
 )
 from app.audit.service import resolve_audit_profile
-from app.db.models import Audit, AuditProcessingStage, AuditStatus, EffectiveState
+from app.compliance.policy import PolicyRegistryError, select_policy_version
+from app.compliance.rule_registry import RULE_PACK, RULE_REGISTRY, RuleRegistryError
+from app.compliance.service import ComplianceError, persist_audit_findings
+from app.db.models import Audit, AuditProcessingStage, AuditStatus, EffectiveState, Finding
 from app.db.models.common import utc_now
 from app.ingestion.storage import ArtifactStorage
 from app.interpretation import (
@@ -31,6 +34,7 @@ class AuditPipelineResult:
     profile_resolution: ProfileResolutionResult
     interpretation: AuditInterpretationResult | None
     effective_states: tuple[EffectiveState, ...] | None
+    findings: tuple[Finding, ...] | None
     stages: tuple[AuditProcessingStage, ...]
 
 
@@ -57,7 +61,7 @@ class AuditPipelineCoordinator:
             resolution.resolution_status != ResolutionStatus.RESOLVED
             or resolution.selected_profile_version_id is None
         ):
-            return AuditPipelineResult(resolution, None, None, tuple(stages))
+            return AuditPipelineResult(resolution, None, None, None, tuple(stages))
 
         pack = self._load_audit_pack(
             audit_id, organization_id, resolution.selected_profile_version_id
@@ -102,9 +106,67 @@ class AuditPipelineCoordinator:
                 db, audit_id=audit_id, organization_id=organization_id
             )
             self._commit(db, "effective_state_persistence_failed")
+        self._pin_compliance_versions_and_set_stage(audit_id, organization_id)
+        stages.append(AuditProcessingStage.EVALUATING)
+        with self._factory() as db:
+            # Compliance receives a fresh canonical database read, never resolver output.
+            persisted_states = tuple(db.scalars(select(EffectiveState).where(
+                EffectiveState.audit_id == audit_id
+            ).order_by(EffectiveState.field_id, EffectiveState.scope_key)))
+            audit = db.scalar(select(Audit).where(
+                Audit.audit_id == audit_id, Audit.organization_id == organization_id
+            ))
+            if audit is None:
+                raise AuditNotFoundError("audit_not_found", "Audit not found")
+            try:
+                rule_pack = RULE_REGISTRY.get(UUID(audit.version_refs["rule_pack_versions"][0]))
+                policy = select_policy_version(
+                    organization_id, audit.version_refs.get("organization_policy_version_id")
+                )
+            except (KeyError, TypeError, ValueError, RuleRegistryError, PolicyRegistryError):
+                raise AuditConflictError(
+                    "audit_version_conflict", "Audit compliance versions are already pinned differently"
+                ) from None
+            findings = persist_audit_findings(
+                db, audit_id=audit_id, organization_id=organization_id, rule_pack=rule_pack,
+                organization_policy=policy, effective_states=persisted_states,
+            )
+            self._commit(db, "finding_persistence_failed")
         return AuditPipelineResult(
-            resolution, interpretation, effective_states, tuple(stages)
+            resolution, interpretation, effective_states, findings, tuple(stages)
         )
+
+    def _pin_compliance_versions_and_set_stage(self, audit_id: UUID, organization_id: UUID) -> None:
+        with self._factory() as db:
+            audit = db.scalar(select(Audit).where(
+                Audit.audit_id == audit_id, Audit.organization_id == organization_id
+            ).with_for_update())
+            if audit is None or audit.status is not AuditStatus.PROCESSING:
+                raise AuditConflictError("audit_not_processing", "Audit is not processing")
+            existing_packs = audit.version_refs.get("rule_pack_versions")
+            expected_pack = str(RULE_PACK.rule_pack_version_id)
+            if existing_packs is None:
+                packs = [expected_pack]
+            elif isinstance(existing_packs, list) and expected_pack in existing_packs:
+                packs = existing_packs
+            else:
+                raise AuditConflictError("audit_version_conflict", "Audit compliance versions are already pinned differently")
+            try:
+                policy = select_policy_version(
+                    organization_id, audit.version_refs.get("organization_policy_version_id")
+                )
+            except PolicyRegistryError:
+                raise AuditConflictError("audit_version_conflict", "Audit compliance versions are already pinned differently") from None
+            pinned_policy = audit.version_refs.get("organization_policy_version_id")
+            policy_id = str(policy.organization_policy_version_id)
+            if pinned_policy is not None and pinned_policy != policy_id:
+                raise AuditConflictError("audit_version_conflict", "Audit compliance versions are already pinned differently")
+            audit.version_refs = {
+                **audit.version_refs, "rule_pack_versions": packs,
+                "organization_policy_version_id": policy_id,
+            }
+            audit.processing_stage = AuditProcessingStage.EVALUATING
+            self._commit(db, "audit_pipeline_checkpoint_failed")
 
     def _load_audit_pack(
         self, audit_id: UUID, organization_id: UUID, profile_version_id: str

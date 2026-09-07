@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+from types import MappingProxyType
+from uuid import uuid5
+
+from app.compliance.models import RULE_PACK_NAMESPACE, RuleDefinition, RulePack
+from app.compliance.verdicts import FindingSeverity
+from app.profile_resolution import CISCO_IOS_XE_17
+
+
+class RuleRegistryError(ValueError):
+    pass
+
+
+SUPPORTED_OPERATORS = frozenset({
+    "equals", "less_than_or_equal", "non_empty", "all_members_in_parameter_set",
+})
+
+
+def _rule(rule_id: str, title: str, domain: str, severity: FindingSeverity, field: str,
+          operator: str, expected: object | None = None, parameter: str | None = None) -> RuleDefinition:
+    condition: dict[str, object] = {"operator": operator}
+    if expected is not None:
+        condition["expected"] = expected
+    if parameter is not None:
+        condition["parameter"] = parameter
+    return RuleDefinition(
+        rule_id=rule_id, title=title, description=title, security_domain=domain,
+        severity=severity, severity_reason="Internal technical baseline severity.",
+        applicability=MappingProxyType({"profile_version_id": CISCO_IOS_XE_17.profile_version_id}),
+        required_effective_states=(field,), condition=MappingProxyType(condition),
+        required_policy_parameters=((parameter,) if parameter else ()), framework_references=(),
+    )
+
+
+RULES = (
+    _rule("management.telnet.disabled", "Telnet management access disabled", "management", FindingSeverity.HIGH, "management.remote.telnet.enabled", "equals", False),
+    _rule("management.ssh.enabled", "SSH management access enabled", "management", FindingSeverity.HIGH, "management.remote.ssh.enabled", "equals", True),
+    _rule("management.ssh.version_2", "SSH protocol version 2 required", "management", FindingSeverity.MEDIUM, "management.remote.ssh.version", "equals", 2),
+    _rule("management.idle_timeout.maximum", "Administrative idle timeout within organization maximum", "management", FindingSeverity.MEDIUM, "management.session.idle_timeout", "less_than_or_equal", parameter="maximum_admin_idle_timeout_seconds"),
+    _rule("logging.remote.destination.configured", "Remote logging destination configured", "logging", FindingSeverity.MEDIUM, "logging.remote.destination", "non_empty"),
+    _rule("logging.remote.destination.approved", "Remote logging destinations approved by organization policy", "logging", FindingSeverity.MEDIUM, "logging.remote.destination", "all_members_in_parameter_set", parameter="approved_logging_destinations"),
+    _rule("time.ntp.server.configured", "NTP server configured", "time", FindingSeverity.MEDIUM, "time.ntp.server", "non_empty"),
+    _rule("time.ntp.server.approved", "NTP servers approved by organization policy", "time", FindingSeverity.MEDIUM, "time.ntp.server", "all_members_in_parameter_set", parameter="approved_ntp_servers"),
+)
+
+RULE_PACK = RulePack(
+    rule_pack_version_id=uuid5(RULE_PACK_NAMESPACE, "cisco_iosxe_17_technical_baseline@1.0.0"),
+    name="cisco_iosxe_17_technical_baseline", version="1.0.0",
+    profile_version_id=CISCO_IOS_XE_17.profile_version_id, rules=RULES,
+)
+
+
+class RuleRegistry:
+    def __init__(self, packs: tuple[RulePack, ...] = (RULE_PACK,)) -> None:
+        self._packs = {}
+        self._logical_versions: dict[tuple[str, str], RulePack] = {}
+        for pack in packs:
+            self._validate(pack)
+            existing = self._packs.get(pack.rule_pack_version_id)
+            logical = self._logical_versions.get((pack.name, pack.version))
+            if (existing is not None and existing != pack) or (logical is not None and logical != pack):
+                raise RuleRegistryError("Rule pack version content conflicts")
+            self._packs[pack.rule_pack_version_id] = pack
+            self._logical_versions[(pack.name, pack.version)] = pack
+
+    def get(self, version_id):
+        try:
+            return self._packs[version_id]
+        except KeyError as exc:
+            raise RuleRegistryError("Rule pack version is unavailable") from exc
+
+    @staticmethod
+    def _validate(pack: RulePack) -> None:
+        if not pack.name.strip() or not pack.version.strip() or not pack.rules:
+            raise RuleRegistryError("Rule pack is malformed")
+        ids = [rule.rule_id for rule in pack.rules]
+        if len(ids) != len(set(ids)) or any(not item.strip() for item in ids):
+            raise RuleRegistryError("Rule pack has duplicate or malformed rule IDs")
+        for rule in pack.rules:
+            if len(rule.required_effective_states) != 1:
+                raise RuleRegistryError("Only single-field rules are supported in Step 7.1")
+            if rule.condition.get("operator") not in SUPPORTED_OPERATORS:
+                raise RuleRegistryError("Rule pack uses an unsupported operator")
+
+
+RULE_REGISTRY = RuleRegistry()

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.audit.errors import AuditWorkflowError
 from app.audit.pipeline import AuditPipelineCoordinator
+from app.compliance.service import ComplianceError
 from app.db.models import Audit, Job, JobType
 from app.effective_state.exceptions import EffectiveStateError
 from app.ingestion.storage import ArtifactStorage
@@ -52,5 +53,5 @@ class AuditJobHandler:
             AuditPipelineCoordinator(self.factory, self.storage).run(
                 audit_id, organization_id
             )
-        except (AuditWorkflowError, InterpretationWorkflowError, EffectiveStateError):
+        except (AuditWorkflowError, InterpretationWorkflowError, EffectiveStateError, ComplianceError):
             raise JobError("Audit pipeline execution failed") from None

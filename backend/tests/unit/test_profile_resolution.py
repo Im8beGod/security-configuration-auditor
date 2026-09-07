@@ -65,7 +65,7 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
     assert not CISCO_IOS_XE_17.version_constraint.accepts("16.12.5")
     assert CISCO_IOS_XE_17.capabilities == {
         "profile_detection", "structural_parsing", "semantic_interpretation",
-        "effective_state_resolution",
+        "effective_state_resolution", "deterministic_compliance",
     }
     coverage = CISCO_IOS_XE_17.coverage_manifest
     assert coverage["profile_detection"] is True

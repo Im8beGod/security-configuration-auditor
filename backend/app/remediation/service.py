@@ -72,7 +72,7 @@ def _value(definition, value):
     if kind in {"integer", "port"}:
         try: number = int(value)
         except ValueError: raise RemediationError("invalid_parameters") from None
-        if kind == "port" and not 1 <= number <= 65535: raise ValueError
+        if kind == "port" and not 1 <= number <= 65535: raise RemediationError("invalid_parameters")
         return str(number)
     if kind == "enum" and value in definition.get("values", []): return value
     raise RemediationError("invalid_parameters")

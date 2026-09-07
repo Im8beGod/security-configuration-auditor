@@ -38,7 +38,7 @@ def test_concurrent_artifact_assignment_has_one_atomic_winner():
     snapshot_ids = []
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0008"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0009"
         organization_id, user_id = bootstrap_admin(
             factory, "Snapshot Concurrency", f"snapshot-race-{suffix}",
             f"snapshot-race-{suffix}@example.invalid", "test-password"

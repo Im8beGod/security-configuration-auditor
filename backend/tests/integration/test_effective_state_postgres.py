@@ -48,7 +48,7 @@ def test_effective_state_persistence_is_unique_and_retains_fact_provenance():
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0008"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0009"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(

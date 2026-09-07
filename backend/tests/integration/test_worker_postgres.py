@@ -79,5 +79,5 @@ def test_production_noop_and_controlled_failure_lifecycle():
                 db.execute(delete(Job).where(Job.job_id.in_(job_ids)))
         with factory() as db:
             assert not db.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0008"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0009"
         engine.dispose()

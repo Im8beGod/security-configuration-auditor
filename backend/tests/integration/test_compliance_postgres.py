@@ -46,7 +46,7 @@ def test_findings_are_deterministic_unique_and_retryable_only_while_processing()
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0008"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0009"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(factory, "Step 7", f"step7-{suffix}", f"step7-{suffix}@example.invalid", "test-only-password")
         with factory.begin() as db:

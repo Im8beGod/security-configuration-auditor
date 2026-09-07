@@ -21,6 +21,7 @@ def test_parameter_validation_is_bounded_and_canonical():
     with pytest.raises((RemediationError, ValueError)): _value(definition("ip_network"), "192.0.2.1/99")
     with pytest.raises(RemediationError): _value(definition("hostname"), "safe\nnext")
     with pytest.raises(RemediationError): _value(definition("integer"), "not-a-number")
+    with pytest.raises(RemediationError): _value(definition("port"), "65536")
 
 def test_registry_schema_rejects_unknown_placeholder_and_duplicates():
     invalid = procedure(ordered_steps=[{"text": "set {unknown}"}])

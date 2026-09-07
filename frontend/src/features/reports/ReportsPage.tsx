@@ -1,5 +1,2 @@
-import { PlaceholderPage } from '../../shared/components/PlaceholderPage'
-
-export function ReportsPage() {
-  return <PlaceholderPage title="Reports" description="Report workflows will be implemented later." />
-}
+import { Link } from 'react-router-dom'
+export function ReportsPage() { return <section className="page-stack"><header className="page-heading"><div><span className="eyebrow">Immutable exports</span><h1>Reports</h1><p>Generate device compliance PDFs from completed audits.</p></div></header><section className="panel"><h2>Reports stay with their audit</h2><p>Open a completed audit to generate, monitor, and download its server-authored PDF. This keeps each export tied to the exact persisted audit revision it represents.</p><Link className="button-primary" to="/audits">Browse Audits</Link></section></section> }

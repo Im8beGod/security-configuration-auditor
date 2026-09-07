@@ -88,3 +88,12 @@ export async function apiRequest(
   }
   return body
 }
+
+export async function apiDownload(path: string): Promise<Blob> {
+  const response = await fetch(apiUrl(path), { credentials: 'include' })
+  if (!response.ok) {
+    const body = await parseJson(response)
+    throw new ApiError(response.status, safeErrorMessage(body, response.statusText || 'Download failed'))
+  }
+  return response.blob()
+}

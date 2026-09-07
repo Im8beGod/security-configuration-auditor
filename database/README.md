@@ -13,7 +13,7 @@ alembic -c database/alembic.ini upgrade head
 Migration scripts live in `database/migrations/`. New schema changes must be
 implemented as explicit Alembic revisions. The baseline revision is
 intentionally empty because it predates all application ORM models.
-The current migration head is `20260907_0009`.
+The current migration head is `20260907_0010`.
 
 The first application tables are `organizations` and `users`. Every user
 belongs to exactly one organization. User email addresses are globally unique

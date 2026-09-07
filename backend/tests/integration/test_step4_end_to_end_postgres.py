@@ -44,7 +44,7 @@ def test_step4_integrated_workflow_reaches_truthful_queue_boundary(tmp_path):
     organization_ids = []
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0009"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0010"
 
         suffix = uuid4().hex
         first_org, _ = bootstrap_admin(
@@ -137,7 +137,7 @@ def test_step4_integrated_workflow_reaches_truthful_queue_boundary(tmp_path):
                 factory, handlers=PRODUCTION_HANDLERS,
                 poll_interval_seconds=settings.worker_poll_interval_seconds,
             )
-            assert runtime.supported_job_types == frozenset({JobType.SYSTEM_NOOP})
+            assert runtime.supported_job_types == frozenset({JobType.SYSTEM_NOOP, JobType.PDF_GENERATION})
             assert [runtime.run_iteration() for _ in range(3)] == [False, False, False]
             assert client.post(
                 f"/api/v1/snapshots/{snapshot_id}/artifacts/{successful[1]['artifact_id']}"

@@ -14,6 +14,7 @@ from app.db.models.device import Device, DeviceClass, DeviceIdentityStatus
 from app.db.models.effective_state import EffectiveState
 from app.db.models.finding import Finding
 from app.db.models.remediation_procedure import RemediationProcedure, RemediationProcedureStatus
+from app.db.models.report import Report, ReportStatus
 from app.db.models.job import Job
 from app.db.models.organization import Organization
 from app.db.models.security_fact import (
@@ -48,6 +49,8 @@ __all__ = [
     "Finding",
     "RemediationProcedure",
     "RemediationProcedureStatus",
+    "Report",
+    "ReportStatus",
     "Job",
     "JobStatus",
     "JobType",

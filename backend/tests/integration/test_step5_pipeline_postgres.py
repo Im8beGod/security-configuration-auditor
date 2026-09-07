@@ -40,7 +40,7 @@ from app.db.models import (
 from app.db.session import create_session_factory
 from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.jobs.errors import JobError
-from app.jobs.handlers import AuditJobHandler, handle_system_noop
+from app.jobs.handlers import AuditJobHandler, handle_pdf_generation, handle_system_noop
 from app.jobs.runner import PRODUCTION_HANDLERS
 from app.jobs.service import enqueue_job
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
@@ -73,7 +73,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         with engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260907_0009"
+            ) == "20260907_0010"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
@@ -395,7 +395,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         assert str(error.value) == "Audit Job reference is invalid"
 
         assert handle_system_noop(uuid4()) is None
-        assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop}
+        assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation}
         assert "effective_states" in Base.metadata.tables
         assert "findings" in Base.metadata.tables
     finally:

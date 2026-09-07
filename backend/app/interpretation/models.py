@@ -34,6 +34,7 @@ class InterpretationResult:
     facts: tuple[SecurityFactDraft, ...]
     diagnostics: tuple[InterpretationDiagnostic, ...]
     metrics: InterpretationMetrics
+    unresolved_node_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

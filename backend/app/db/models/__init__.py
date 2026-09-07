@@ -31,6 +31,17 @@ from app.db.models.snapshot import (
     SnapshotStatus,
 )
 from app.db.models.user import User, UserRole
+from app.db.models.training import (
+    KnowledgePackRecord,
+    KnowledgePackVersionRecord,
+    MappingOrigin,
+    MappingStatus,
+    MappingValidationRun,
+    MappingVersion,
+    UnresolvedBlock,
+    UnresolvedReviewStatus,
+    ValidationRunStatus,
+)
 from app.jobs.enums import JobStatus, JobType
 
 __all__ = [
@@ -66,4 +77,13 @@ __all__ = [
     "SnapshotStatus",
     "User",
     "UserRole",
+    "KnowledgePackRecord",
+    "KnowledgePackVersionRecord",
+    "MappingOrigin",
+    "MappingStatus",
+    "MappingValidationRun",
+    "MappingVersion",
+    "UnresolvedBlock",
+    "UnresolvedReviewStatus",
+    "ValidationRunStatus",
 ]

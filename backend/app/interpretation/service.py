@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from uuid import UUID, uuid5
@@ -21,6 +22,7 @@ from app.db.models import (
     SecurityFact,
     Snapshot,
     SnapshotStatus,
+    UnresolvedBlock,
 )
 from app.ingestion.storage import ArtifactStorage
 from app.interpretation.exceptions import (
@@ -244,7 +246,8 @@ def interpret_structural_ir(
         unsupported_cases=len(diagnostics),
     )
     return InterpretationResult(
-        facts=tuple(facts), diagnostics=tuple(diagnostics), metrics=metrics
+        facts=tuple(facts), diagnostics=tuple(diagnostics), metrics=metrics,
+        unresolved_node_ids=tuple(node.node_id for node in statements if node.node_id not in matched_node_ids),
     )
 
 
@@ -428,6 +431,15 @@ def interpret_audit(
         for draft in drafts:
             if draft.fact_id not in existing_ids:
                 db.add(_to_orm(draft))
+        _persist_unresolved_blocks(
+            db,
+            organization_id=organization_id,
+            context=context,
+            profile_id=profile_id,
+            profile_version_id=profile_version_id,
+            parsed_irs=parsed_irs,
+            results=artifact_results,
+        )
         db.commit()
     except SQLAlchemyError:
         db.rollback()
@@ -634,6 +646,67 @@ def _to_orm(draft: SecurityFactDraft) -> SecurityFact:
         interpretation_confidence=draft.interpretation_confidence,
         schema_version=draft.schema_version,
     )
+
+
+def _persist_unresolved_blocks(
+    db: Session,
+    *,
+    organization_id: UUID,
+    context: InterpretationContext,
+    profile_id: str,
+    profile_version_id: str,
+    parsed_irs: list[StructuralIR],
+    results: list[InterpretationResult],
+) -> None:
+    for ir, result in zip(parsed_irs, results, strict=True):
+        diagnostics = {item.node_id: item.code for item in result.diagnostics if item.node_id}
+        nodes = {node.node_id: node for node in ir.nodes}
+        for node_id in result.unresolved_node_ids:
+            node = nodes[node_id]
+            parent = nodes.get(node.parent_id) if node.parent_id else None
+            identity = f"{context.audit_id}:{node.artifact_id}:{node.node_id}"
+            fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+            exists = db.scalar(select(UnresolvedBlock.unresolved_block_id).where(
+                UnresolvedBlock.audit_id == context.audit_id,
+                UnresolvedBlock.fingerprint == fingerprint,
+            ))
+            if exists is not None:
+                continue
+            nearby = sorted(ir.nodes, key=lambda item: item.order)
+            position = next(index for index, item in enumerate(nearby) if item.node_id == node.node_id)
+            context_text = "\n".join(item.raw_text for item in nearby[max(0, position - 2):position + 3])[:4096]
+            db.add(UnresolvedBlock(
+                organization_id=organization_id,
+                audit_id=context.audit_id,
+                device_id=context.device_id,
+                snapshot_id=context.snapshot_id,
+                profile_id=profile_id,
+                profile_version_id=profile_version_id,
+                source_ir_node_ids=[node.node_id],
+                evidence_refs=[{
+                    "artifact_id": str(node.artifact_id),
+                    "start_line": node.source_start,
+                    "end_line": node.source_end,
+                    "source_path": node.source_label,
+                    "ir_node_id": node.node_id,
+                    "evidence_type": ArtifactEvidenceType.CONFIGURATION.value,
+                }],
+                raw_text=node.raw_text[:2048],
+                surrounding_context=context_text,
+                unknown_reason=diagnostics.get(node.node_id, "unmapped_syntax"),
+                candidate_field_ids=[],
+                affected_rule_ids=[],
+                fingerprint=fingerprint,
+                occurrence={
+                    "artifact_id": str(node.artifact_id),
+                    "command": node.command,
+                    "arguments": list(node.arguments),
+                    "parent_command": parent.command if parent else None,
+                    "ancestor_commands": list(node.context_path),
+                    "negated": node.negated,
+                    "order": node.order,
+                },
+            ))
 
 
 def _add_diagnostic(

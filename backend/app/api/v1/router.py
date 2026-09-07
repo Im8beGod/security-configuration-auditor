@@ -9,6 +9,7 @@ from app.api.v1.jobs import router as jobs_router
 from app.api.v1.findings import router as findings_router
 from app.api.v1.snapshots import router as snapshots_router
 from app.api.v1.reports import router as reports_router
+from app.api.v1.training import router as training_router
 
 
 router = APIRouter()
@@ -21,3 +22,4 @@ router.include_router(jobs_router)
 router.include_router(findings_router)
 router.include_router(snapshots_router)
 router.include_router(reports_router)
+router.include_router(training_router)

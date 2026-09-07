@@ -15,6 +15,7 @@ import { FindingsPage } from '../../features/findings/FindingsPage'
 import { FindingDetailPage } from '../../features/findings/FindingDetailPage'
 import { ReportsPage } from '../../features/reports/ReportsPage'
 import { TrainingPage } from '../../features/training/TrainingPage'
+import { UnresolvedDetailPage } from '../../features/training/UnresolvedDetailPage'
 import { UploadsPage } from '../../features/uploads/UploadsPage'
 import { NotFoundPage } from '../../shared/components/NotFoundPage'
 
@@ -39,7 +40,10 @@ export const router = createBrowserRouter([
           { path: '/reports', element: <ReportsPage /> },
           {
             element: <RequireRole allowedRoles={TRAINING_ROLES} />,
-            children: [{ path: '/training', element: <TrainingPage /> }],
+            children: [
+              { path: '/training', element: <TrainingPage /> },
+              { path: '/training/unresolved/:unresolvedId', element: <UnresolvedDetailPage /> },
+            ],
           },
           { path: '*', element: <NotFoundPage /> },
         ],

@@ -36,11 +36,12 @@ from app.db.models import (
     SnapshotSource,
     SnapshotStatus,
     User,
+    UnresolvedBlock,
 )
 from app.db.session import create_session_factory
 from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.jobs.errors import JobError
-from app.jobs.handlers import AuditJobHandler, handle_pdf_generation, handle_system_noop
+from app.jobs.handlers import AuditJobHandler, handle_mapping_validation, handle_pdf_generation, handle_system_noop
 from app.jobs.runner import PRODUCTION_HANDLERS
 from app.jobs.service import enqueue_job
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
@@ -73,7 +74,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         with engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260907_0010"
+            ) == "20260908_0011"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
@@ -395,7 +396,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         assert str(error.value) == "Audit Job reference is invalid"
 
         assert handle_system_noop(uuid4()) is None
-        assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation}
+        assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation, JobType.MAPPING_VALIDATION: handle_mapping_validation}
         assert "effective_states" in Base.metadata.tables
         assert "findings" in Base.metadata.tables
     finally:
@@ -408,6 +409,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
                 db.execute(delete(EffectiveState).where(
                     EffectiveState.audit_id.in_(audit_ids)
                 ))
+                db.execute(delete(UnresolvedBlock).where(UnresolvedBlock.audit_id.in_(audit_ids)))
                 db.execute(delete(SecurityFact).where(
                     SecurityFact.audit_id.in_(audit_ids)
                 ))
@@ -508,6 +510,7 @@ def test_step7_pipeline_preserves_unknown_conflict_and_missing_state(tmp_path):
                 ids = select(Audit.audit_id).where(Audit.organization_id == organization_id)
                 db.execute(delete(Finding).where(Finding.audit_id.in_(ids)))
                 db.execute(delete(EffectiveState).where(EffectiveState.audit_id.in_(ids)))
+                db.execute(delete(UnresolvedBlock).where(UnresolvedBlock.audit_id.in_(ids)))
                 db.execute(delete(SecurityFact).where(SecurityFact.audit_id.in_(ids)))
                 db.execute(delete(Audit).where(Audit.organization_id == organization_id))
                 db.execute(delete(Artifact).where(Artifact.organization_id == organization_id))

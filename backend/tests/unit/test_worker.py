@@ -7,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.db.models import Job, JobStatus, JobType
 from app.jobs.handlers.pdf_generation import handle_pdf_generation
+from app.jobs.handlers.mapping_validation import handle_mapping_validation
 from app.jobs.handlers.system_noop import handle_system_noop
 from app.jobs.runner import PRODUCTION_HANDLERS, WorkerRuntime
 from app.jobs.service import enqueue_job
@@ -15,7 +16,7 @@ from app.jobs.service import enqueue_job
 def test_production_handlers_are_explicit_and_noop_is_side_effect_free():
     job_id = uuid4()
     assert handle_system_noop(job_id) is None
-    assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation}
+    assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation, JobType.MAPPING_VALIDATION: handle_mapping_validation}
 
 
 def test_production_runtime_waits_when_only_unsupported_jobs_exist(job_factory):
@@ -33,7 +34,7 @@ def test_production_runtime_waits_when_only_unsupported_jobs_exist(job_factory):
         job_factory, handlers=PRODUCTION_HANDLERS, poll_interval_seconds=1.25,
         shutdown_event=shutdown, wait=wait,
     )
-    assert runtime.supported_job_types == frozenset({JobType.SYSTEM_NOOP, JobType.PDF_GENERATION})
+    assert runtime.supported_job_types == frozenset({JobType.SYSTEM_NOOP, JobType.PDF_GENERATION, JobType.MAPPING_VALIDATION})
     runtime.run_forever()
     assert waits == [1.25]
     with job_factory() as db:

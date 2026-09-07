@@ -30,6 +30,7 @@ from app.db.models import (
     SnapshotSource,
     SnapshotStatus,
     User,
+    UnresolvedBlock,
 )
 from app.db.session import create_session_factory
 from app.ingestion.storage import LocalFilesystemArtifactStorage
@@ -61,7 +62,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
 
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0010"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
 
         suffix = uuid4().hex
         first_org, first_user = bootstrap_admin(
@@ -158,6 +159,8 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
             assert db.scalar(select(func.count()).select_from(SecurityFact).where(
                 SecurityFact.audit_id == audit_id
             )) == 7
+            unresolved_count = db.scalar(select(func.count()).select_from(UnresolvedBlock).where(UnresolvedBlock.audit_id == audit_id))
+            assert unresolved_count and unresolved_count > 0
             persisted = list_audit_security_facts(db, audit_id, first_org)
             assert {fact.fact_id for fact in persisted} == first_ids
             assert {fact.field_id for fact in persisted} == {
@@ -210,6 +213,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
                 audit_ids = select(Audit.audit_id).where(
                     Audit.organization_id.in_(organization_ids)
                 )
+                db.execute(delete(UnresolvedBlock).where(UnresolvedBlock.audit_id.in_(audit_ids)))
                 db.execute(delete(SecurityFact).where(SecurityFact.audit_id.in_(audit_ids)))
                 db.execute(delete(Job).where(Job.audit_id.in_(audit_ids)))
                 db.execute(delete(Audit).where(Audit.organization_id.in_(organization_ids)))

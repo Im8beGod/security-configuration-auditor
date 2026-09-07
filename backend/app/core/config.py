@@ -76,6 +76,7 @@ class Settings(ApplicationSettings):
     worker_poll_interval_seconds: float = Field(
         default=1.0, ge=0.1, allow_inf_nan=False
     )
+    ai_mapping_suggestions_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_cookie_security(self) -> "Settings":

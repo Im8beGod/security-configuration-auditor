@@ -256,6 +256,19 @@ def test_api_surface_and_configured_prefix(auth_settings):
         },
         "/api/test/snapshots/{snapshot_id}/finalize": {"post"},
         "/api/test/jobs/{job_id}": {"get"},
+        "/api/test/training/unresolved": {"get"},
+        "/api/test/training/unresolved/{block_id}": {"get", "patch"},
+        "/api/test/training/unresolved/{block_id}/suggest": {"post"},
+        "/api/test/training/mappings": {"post"},
+        "/api/test/training/mappings/{mapping_version_id}": {"get", "put"},
+        "/api/test/training/mappings/{mapping_version_id}/validate": {"post"},
+        "/api/test/training/mappings/{mapping_version_id}/approve": {"post"},
+        "/api/test/training/mappings/{mapping_version_id}/publish": {"post"},
+        "/api/test/training/mappings/{mapping_version_id}/reject": {"post"},
+        "/api/test/training/mappings/{mapping_version_id}/impact": {"get"},
+        "/api/test/training/knowledge-packs": {"get"},
+        "/api/test/training/knowledge-packs/{pack_id}/versions": {"get"},
+        "/api/test/training/canonical-fields": {"get"},
     }
     with TestClient(application) as client:
         assert client.post("/api/test/auth/register").status_code == 404

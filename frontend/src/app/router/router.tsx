@@ -12,6 +12,7 @@ import { DevicesPage } from '../../features/devices/DevicesPage'
 import { DeviceDetailPage } from '../../features/devices/DeviceDetailPage'
 import { SnapshotDetailPage } from '../../features/devices/SnapshotDetailPage'
 import { FindingsPage } from '../../features/findings/FindingsPage'
+import { FindingDetailPage } from '../../features/findings/FindingDetailPage'
 import { ReportsPage } from '../../features/reports/ReportsPage'
 import { TrainingPage } from '../../features/training/TrainingPage'
 import { UploadsPage } from '../../features/uploads/UploadsPage'
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
           { path: '/audits', element: <AuditsPage /> },
           { path: '/audits/:auditId', element: <AuditDetailPage /> },
           { path: '/findings', element: <FindingsPage /> },
+          { path: '/findings/:findingId', element: <FindingDetailPage /> },
           { path: '/reports', element: <ReportsPage /> },
           {
             element: <RequireRole allowedRoles={TRAINING_ROLES} />,

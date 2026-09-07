@@ -241,6 +241,24 @@ th { color: var(--muted); background: #f0f2ec; font-size: 0.75rem; letter-spacin
 .metric-grid article strong { display: block; margin: 0.25rem 0; font-family: Georgia, serif; font-size: 2.4rem; }
 .progress-track { height: 0.6rem; overflow: hidden; margin: 1rem 0; border-radius: 999px; background: #dfe5df; }
 .progress-track span { display: block; height: 100%; background: var(--forest-bright); }
+.finding-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; }
+.finding-filters label { display: grid; gap: 0.35rem; min-width: 12rem; font-weight: 700; }
+.finding-filters input, .finding-filters select { border: 1px solid #aeb9b2; border-radius: 0.3rem; background: white; }
+.finding-list { display: grid; gap: 0.8rem; }
+.finding-card { display: grid; gap: 0.65rem; padding: 1.15rem 1.25rem; border: 1px solid var(--line); border-left: 4px solid var(--forest-bright); border-radius: 0.65rem; color: var(--ink); background: var(--panel); text-decoration: none; transition: transform 150ms ease, box-shadow 150ms ease; }
+.finding-card:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(21, 37, 31, 0.09); }
+.finding-card h2 { margin: 0.15rem 0 0; font-family: Georgia, serif; font-size: 1.3rem; }
+.finding-card p { margin: 0; color: var(--muted); }
+.finding-card-head, .finding-card-foot, .badge-pair, .pagination { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.finding-card-foot { color: var(--muted); font-size: 0.9rem; }
+.finding-card-foot small { overflow-wrap: anywhere; }
+.badge-pair { flex-wrap: wrap; justify-content: end; }
+.finding-badge { display: inline-flex; width: fit-content; padding: 0.25rem 0.55rem; border: 1px solid #b8c4bd; border-radius: 999px; color: #31473c; background: #edf2ed; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+.verdict-pass { color: #145c3b; border-color: #9ac7ad; background: #e1f3e8; }.verdict-fail, .verdict-process_error { color: #8c2d27; border-color: #dba9a4; background: #fbe8e6; }.verdict-unknown { color: #72540d; border-color: #e0c47e; background: #fff2cc; }.verdict-manual_review { color: #235181; border-color: #a8bfd8; background: #e8f0fa; }.verdict-not_applicable { color: #4e5551; background: #eceeed; }
+.severity-critical { color: white; border-color: #7b211c; background: #8c2d27; }.severity-high { color: #8c2d27; border-color: #dba9a4; background: #fbe8e6; }.severity-medium { color: #72540d; border-color: #e0c47e; background: #fff2cc; }.severity-low { color: #235181; border-color: #a8bfd8; background: #e8f0fa; }.severity-informational { color: #4e5551; background: #eceeed; }
+.pagination { justify-content: center; padding: 0.5rem; color: var(--muted); }
+.structured-value, .evidence-excerpt { max-width: 100%; overflow: auto; padding: 0.8rem; border-radius: 0.4rem; color: #e6efe9; background: #132820; font-family: "Cascadia Code", Consolas, monospace; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: normal; }
+.muted-value { color: var(--muted); font-style: italic; }.provenance-details summary, details summary { cursor: pointer; font-weight: 700; }.provenance-line { overflow-wrap: anywhere; color: var(--muted); font-size: 0.85rem; }.evidence-state h3, .evidence-fact h4 { margin: 0.2rem 0; font-family: Georgia, serif; }.evidence-fact { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }.evidence-artifact { display: grid; gap: 0.45rem; margin-top: 1rem; padding: 1rem; border-radius: 0.5rem; background: #f2f5f0; }.evidence-artifact > span { color: var(--muted); font-size: 0.85rem; }
 
 @keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -287,4 +305,6 @@ th { color: var(--muted); background: #f0f2ec; font-size: 0.75rem; letter-spacin
   .stat-strip > div { border-right: 0; border-bottom: 1px solid var(--line); }
   .selection-list label { grid-template-columns: auto 1fr; }
   .selection-list .status-badge { grid-column: 2; }
+  .finding-card-head, .finding-card-foot { align-items: flex-start; flex-direction: column; }
+  .badge-pair { justify-content: start; }
 }

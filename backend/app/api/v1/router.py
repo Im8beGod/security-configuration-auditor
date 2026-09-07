@@ -5,6 +5,7 @@ from app.api.v1.artifacts import router as artifacts_router
 from app.api.v1.audits import router as audits_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.findings import router as findings_router
 from app.api.v1.snapshots import router as snapshots_router
 
 
@@ -14,4 +15,5 @@ router.include_router(artifacts_router)
 router.include_router(audits_router)
 router.include_router(devices_router)
 router.include_router(jobs_router)
+router.include_router(findings_router)
 router.include_router(snapshots_router)

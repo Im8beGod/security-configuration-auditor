@@ -19,6 +19,7 @@ from app.interpretation.knowledge_pack import (
 )
 from app.interpretation.scopes import SCOPE_RESOLVER_TYPES
 from app.interpretation.service import load_validated_knowledge_pack
+from app.interpretation.service import load_validated_knowledge_pack_by_version
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
 from app.security_model import (
     FIELD_REGISTRY,
@@ -87,7 +88,7 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
     assert pack.profile_id == "cisco.ios_xe.17"
     assert pack.profile_version_id == "cisco.ios_xe.17@1.0.0"
     assert pack.knowledge_pack_id == UUID("33ededa8-0c17-55e0-b104-302fc55de5b8")
-    assert pack.knowledge_pack_version_id == UUID("17e3e913-17df-53bf-b8c1-5cae4bfa133e")
+    assert pack.knowledge_pack_version_id == UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
     assert [item.mapping_id for item in pack.mappings] == [
         UUID("c2a81d5b-9591-5ecd-beee-46beb57acced"),
         UUID("bc2cc368-40eb-53ed-896e-5efd779359d3"),
@@ -104,6 +105,19 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
         UUID("f112df12-f860-5fad-b013-7b89701d2fcf"),
         UUID("31eadc31-751e-5451-bdd7-2532a26c9710"),
     ]
+
+
+def test_immutable_knowledge_pack_versions_remain_independently_loadable():
+    legacy = load_validated_knowledge_pack_by_version(
+        UUID("17e3e913-17df-53bf-b8c1-5cae4bfa133e")
+    )
+    current = load_validated_knowledge_pack_by_version(
+        UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
+    )
+    assert legacy.version == "1.0.0"
+    assert current.version == "1.1.0"
+    assert legacy.mappings[0].mapping_version_id == current.mappings[0].mapping_version_id
+    assert current.mappings[0].reset_mapping_version_id == UUID("e42c0eb2-1d5d-584a-b463-8ee80574a35c")
 
 
 @pytest.mark.parametrize(

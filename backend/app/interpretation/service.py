@@ -32,6 +32,7 @@ from app.interpretation.extractors import EXTRACTORS
 from app.interpretation.knowledge_pack import (
     DeclarativeMapping,
     KnowledgePack,
+    NegationBehavior,
     validate_knowledge_pack,
 )
 from app.interpretation.models import (
@@ -43,7 +44,10 @@ from app.interpretation.models import (
     InterpretationResult,
 )
 from app.interpretation.scopes import SCOPE_RESOLVER_TYPES, SCOPE_RESOLVERS
-from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
+from app.knowledge_packs.cisco_iosxe_17 import (
+    CISCO_IOS_XE_17_KNOWLEDGE_PACK,
+    CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1,
+)
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
 from app.parsing.exceptions import (
     ArtifactNotParseableError,
@@ -55,12 +59,19 @@ from app.security_model import (
     EvidenceRef,
     FieldRegistryValidationError,
     SecurityFactDraft,
+    TypedValue,
+    TypedValueType,
+    get_field,
     validate_field_value_scope,
 )
 
 
 KNOWLEDGE_PACKS = {
     CISCO_IOS_XE_17_KNOWLEDGE_PACK.profile_version_id: CISCO_IOS_XE_17_KNOWLEDGE_PACK,
+}
+KNOWLEDGE_PACKS_BY_VERSION = {
+    pack.knowledge_pack_version_id: pack
+    for pack in (CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1, CISCO_IOS_XE_17_KNOWLEDGE_PACK)
 }
 
 
@@ -72,6 +83,34 @@ def load_validated_knowledge_pack(profile_version_id: str) -> KnowledgePack:
         or pack is None
         or profile.knowledge_pack_name != f"{pack.name}@{pack.version}"
     ):
+        raise InterpretationValidationError(
+            "knowledge_pack_unavailable", "No compatible knowledge pack is available"
+        )
+    try:
+        return validate_knowledge_pack(
+            pack,
+            expected_profile_id=profile.profile_id,
+            expected_profile_version_id=profile.profile_version_id,
+            allowed_extractors=frozenset(EXTRACTORS),
+            scope_resolver_types=SCOPE_RESOLVER_TYPES,
+        )
+    except ValueError:
+        raise InterpretationValidationError(
+            "knowledge_pack_invalid", "Knowledge pack validation failed"
+        ) from None
+
+
+def load_validated_knowledge_pack_by_version(
+    knowledge_pack_version_id: UUID,
+) -> KnowledgePack:
+    """Load an immutable historical pack by its exact pinned identity."""
+    pack = KNOWLEDGE_PACKS_BY_VERSION.get(knowledge_pack_version_id)
+    if pack is None:
+        raise InterpretationValidationError(
+            "knowledge_pack_unavailable", "No compatible knowledge pack is available"
+        )
+    profile = PROFILE_REGISTRY.get(pack.profile_version_id)
+    if profile is None:
         raise InterpretationValidationError(
             "knowledge_pack_unavailable", "No compatible knowledge pack is available"
         )
@@ -133,10 +172,21 @@ def interpret_structural_ir(
             if not _matches(mapping, node, ir):
                 continue
             if node.negated:
-                _add_diagnostic(
-                    diagnostics, diagnostic_keys,
-                    "unsupported_negation", node.node_id, mapping.mapping_id,
+                fact = _build_negated_fact(
+                    context=context,
+                    ir=ir,
+                    pack=pack,
+                    mapping=mapping,
+                    node=node,
                 )
+                if fact is None:
+                    _add_diagnostic(
+                        diagnostics, diagnostic_keys,
+                        "unsupported_negation", node.node_id, mapping.mapping_id,
+                    )
+                else:
+                    facts.append(fact)
+                    matched_node_ids.add(node.node_id)
                 continue
             if node.parse_status != ParseStatus.PARSED:
                 _add_diagnostic(
@@ -242,7 +292,20 @@ def interpret_audit(
         raise InterpretationValidationError(
             "audit_profile_incompatible", "Audit has no compatible resolved profile"
         )
-    pack = load_validated_knowledge_pack(profile_version_id)
+    pinned_pack_id = audit.version_refs.get("knowledge_pack_version_id")
+    if pinned_pack_id is None:
+        pack = load_validated_knowledge_pack(profile_version_id)
+    else:
+        try:
+            pack = load_validated_knowledge_pack_by_version(UUID(pinned_pack_id))
+        except (TypeError, ValueError):
+            raise InterpretationValidationError(
+                "knowledge_pack_version_conflict", "Audit knowledge-pack version is incompatible"
+            ) from None
+        if pack.profile_version_id != profile_version_id:
+            raise InterpretationValidationError(
+                "knowledge_pack_version_conflict", "Audit knowledge-pack version is incompatible"
+            )
     artifacts = validate_snapshot_evidence(db, snapshot)
     configuration_artifacts = sorted(
         (
@@ -437,6 +500,10 @@ def _build_fact(
     value,
     scope,
     source_nodes: list[ConfigNode],
+    state: FactState = FactState.EXPLICIT,
+    validation_status: FactValidationStatus = FactValidationStatus.VALIDATED,
+    interpretation_confidence: InterpretationConfidence = InterpretationConfidence.HIGH,
+    mapping_version_id: UUID | None = None,
 ) -> SecurityFactDraft:
     source_ir_node_ids = tuple(node.node_id for node in source_nodes)
     evidence_refs = tuple(EvidenceRef(
@@ -449,7 +516,7 @@ def _build_fact(
     ) for node in source_nodes)
     identity = json.dumps({
         "audit_id": str(context.audit_id),
-        "mapping_version_id": str(mapping.mapping_version_id),
+        "mapping_version_id": str(mapping_version_id or mapping.mapping_version_id),
         "source_ir_node_ids": source_ir_node_ids,
         "field_id": mapping.field_id,
         "scope": scope.to_dict(),
@@ -466,17 +533,83 @@ def _build_fact(
         value=value,
         entity=None,
         scope=scope,
-        state=FactState.EXPLICIT,
+        state=state,
         evidence_refs=evidence_refs,
         source_ir_node_ids=source_ir_node_ids,
         extraction_method=InterpretationMethod.DECLARATIVE_MAPPING,
         mapping_id=mapping.mapping_id,
-        mapping_version_id=mapping.mapping_version_id,
+        mapping_version_id=mapping_version_id or mapping.mapping_version_id,
         knowledge_pack_version_id=pack.knowledge_pack_version_id,
-        validation_status=FactValidationStatus.VALIDATED,
+        validation_status=validation_status,
         dependencies=(),
-        interpretation_confidence=InterpretationConfidence.HIGH,
+        interpretation_confidence=interpretation_confidence,
     )
+
+
+def _build_negated_fact(
+    *,
+    context: InterpretationContext,
+    ir: StructuralIR,
+    pack: KnowledgePack,
+    mapping: DeclarativeMapping,
+    node: ConfigNode,
+) -> SecurityFactDraft | None:
+    """Preserve only versioned, bounded negation operations for later resolution."""
+    behavior = mapping.negation_behavior
+    if behavior is NegationBehavior.UNSUPPORTED:
+        return None
+    if node.parse_status != ParseStatus.PARSED:
+        return None
+    scope_outcome = SCOPE_RESOLVERS[mapping.scope_resolver](node, ir)
+    if scope_outcome.scope is None:
+        return None
+    source_nodes = [node]
+    if scope_outcome.context_node is not None:
+        source_nodes.append(scope_outcome.context_node)
+
+    if behavior is NegationBehavior.RESET_TO_DEFAULT:
+        if tuple(item.lower() for item in node.arguments) != tuple(
+            item.lower() for item in mapping.matcher.arguments_prefix
+        ):
+            return None
+        field = get_field(mapping.field_id)
+        if scope_outcome.scope.type not in field.allowed_scope_types:
+            return None
+        return _build_fact(
+            context=context,
+            ir=ir,
+            pack=pack,
+            mapping=mapping,
+            value=TypedValue(TypedValueType.NULL, None),
+            scope=scope_outcome.scope,
+            source_nodes=source_nodes,
+            state=FactState.UNKNOWN,
+            validation_status=FactValidationStatus.UNRESOLVED,
+            interpretation_confidence=InterpretationConfidence.UNRESOLVED,
+            mapping_version_id=mapping.reset_mapping_version_id,
+        )
+
+    if behavior is NegationBehavior.REMOVE_VALUE:
+        extraction = EXTRACTORS[mapping.extractor](node)
+        if extraction.value is None:
+            return None
+        try:
+            validate_field_value_scope(
+                mapping.field_id, extraction.value, scope_outcome.scope
+            )
+        except FieldRegistryValidationError:
+            return None
+        return _build_fact(
+            context=context,
+            ir=ir,
+            pack=pack,
+            mapping=mapping,
+            value=extraction.value,
+            scope=scope_outcome.scope,
+            source_nodes=source_nodes,
+            mapping_version_id=mapping.removal_mapping_version_id,
+        )
+    return None
 
 
 def _to_orm(draft: SecurityFactDraft) -> SecurityFact:

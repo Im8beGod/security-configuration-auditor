@@ -101,5 +101,5 @@ def test_postgresql_skip_locked_and_lifecycle():
                 db.execute(delete(Job).where(Job.job_id.in_(job_ids)))
         with factory() as db:
             assert not db.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0005"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0006"
         engine.dispose()

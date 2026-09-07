@@ -24,6 +24,7 @@ from app.db.models import (
     AuditReevaluationReason,
     AuditStatus,
     Device,
+    EffectiveState,
     Job,
     JobStatus,
     JobType,
@@ -71,7 +72,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         with engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260907_0005"
+            ) == "20260907_0006"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
@@ -265,17 +266,24 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
             AuditProcessingStage.IDENTIFYING,
             AuditProcessingStage.PARSING,
             AuditProcessingStage.INTERPRETING,
+            AuditProcessingStage.RESOLVING_STATE,
         )
         assert first.interpretation is not None
+        assert first.effective_states is not None
         assert parsed_readers == ["indentation_cli.v1"]
         first_fact_ids = {fact.fact_id for fact in first.interpretation.facts}
+        first_effective_state_ids = {
+            state.effective_state_id for state in first.effective_states
+        }
         assert len(first_fact_ids) == 9
+        # Two logging facts resolve into one canonical repeatable collection.
+        assert len(first_effective_state_ids) == 8
 
         with factory() as db:
             persisted = db.get(Audit, audit_id)
             started_at = persisted.started_at
             assert persisted.status == AuditStatus.PROCESSING
-            assert persisted.processing_stage == AuditProcessingStage.INTERPRETING
+            assert persisted.processing_stage == AuditProcessingStage.RESOLVING_STATE
             assert started_at is not None and persisted.completed_at is None
             assert persisted.version_refs == {
                 "schema_version": "1.0.0",
@@ -322,6 +330,11 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
                 for fact in facts
             )
             assert db.get(Job, audit_job_id).status == JobStatus.QUEUED
+            states = list(db.scalars(select(EffectiveState).where(
+                EffectiveState.audit_id == audit_id
+            )))
+            assert {state.effective_state_id for state in states} == first_effective_state_ids
+            assert all(state.source_fact_ids for state in states)
             unrelated = db.get(Job, unrelated_job_id)
             assert unrelated.status == JobStatus.QUEUED
             assert unrelated.attempt_count == 0
@@ -336,6 +349,10 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
             assert {fact.fact_id for fact in db.scalars(select(SecurityFact).where(
                 SecurityFact.audit_id == audit_id
             ))} == first_fact_ids
+            assert {state.effective_state_id for state in db.scalars(select(
+                EffectiveState
+            ).where(EffectiveState.audit_id == audit_id))} == first_effective_state_ids
+            assert retried.processing_stage == AuditProcessingStage.RESOLVING_STATE
 
         for candidate_id, expected_status in (
             (unsupported_audit_id, ResolutionStatus.UNSUPPORTED),
@@ -355,6 +372,9 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
                 assert db.scalar(select(func.count()).select_from(SecurityFact).where(
                     SecurityFact.audit_id == candidate_id
                 )) == 0
+                assert db.scalar(select(func.count()).select_from(EffectiveState).where(
+                    EffectiveState.audit_id == candidate_id
+                )) == 0
 
         with factory.begin() as db:
             invalid_job = enqueue_job(
@@ -369,7 +389,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
 
         assert handle_system_noop(uuid4()) is None
         assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop}
-        assert "effective_states" not in Base.metadata.tables
+        assert "effective_states" in Base.metadata.tables
         assert "findings" not in Base.metadata.tables
     finally:
         if organization_ids:
@@ -377,6 +397,9 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
                 audit_ids = select(Audit.audit_id).where(
                     Audit.organization_id.in_(organization_ids)
                 )
+                db.execute(delete(EffectiveState).where(
+                    EffectiveState.audit_id.in_(audit_ids)
+                ))
                 db.execute(delete(SecurityFact).where(
                     SecurityFact.audit_id.in_(audit_ids)
                 ))

@@ -13,7 +13,7 @@ from app.audit.errors import (
     AuditNotFoundError,
 )
 from app.audit.service import resolve_audit_profile
-from app.db.models import Audit, AuditProcessingStage, AuditStatus
+from app.db.models import Audit, AuditProcessingStage, AuditStatus, EffectiveState
 from app.db.models.common import utc_now
 from app.ingestion.storage import ArtifactStorage
 from app.interpretation import (
@@ -21,6 +21,8 @@ from app.interpretation import (
     interpret_audit,
     load_validated_knowledge_pack,
 )
+from app.interpretation.service import load_validated_knowledge_pack_by_version
+from app.effective_state.service import resolve_audit_effective_states
 from app.profile_resolution import ProfileResolutionResult, ResolutionStatus
 
 
@@ -28,6 +30,7 @@ from app.profile_resolution import ProfileResolutionResult, ResolutionStatus
 class AuditPipelineResult:
     profile_resolution: ProfileResolutionResult
     interpretation: AuditInterpretationResult | None
+    effective_states: tuple[EffectiveState, ...] | None
     stages: tuple[AuditProcessingStage, ...]
 
 
@@ -54,10 +57,10 @@ class AuditPipelineCoordinator:
             resolution.resolution_status != ResolutionStatus.RESOLVED
             or resolution.selected_profile_version_id is None
         ):
-            return AuditPipelineResult(resolution, None, tuple(stages))
+            return AuditPipelineResult(resolution, None, None, tuple(stages))
 
-        pack = load_validated_knowledge_pack(
-            resolution.selected_profile_version_id
+        pack = self._load_audit_pack(
+            audit_id, organization_id, resolution.selected_profile_version_id
         )
         self._pin_versions_and_set_stage(
             audit_id,
@@ -86,7 +89,46 @@ class AuditPipelineCoordinator:
                 organization_id,
                 before_interpret=begin_interpreting,
             )
-        return AuditPipelineResult(resolution, interpretation, tuple(stages))
+        self._pin_versions_and_set_stage(
+            audit_id,
+            organization_id,
+            profile_version_id=resolution.selected_profile_version_id,
+            knowledge_pack_version_id=pack.knowledge_pack_version_id,
+            stage=AuditProcessingStage.RESOLVING_STATE,
+        )
+        stages.append(AuditProcessingStage.RESOLVING_STATE)
+        with self._factory() as db:
+            effective_states = resolve_audit_effective_states(
+                db, audit_id=audit_id, organization_id=organization_id
+            )
+            self._commit(db, "effective_state_persistence_failed")
+        return AuditPipelineResult(
+            resolution, interpretation, effective_states, tuple(stages)
+        )
+
+    def _load_audit_pack(
+        self, audit_id: UUID, organization_id: UUID, profile_version_id: str
+    ):
+        with self._factory() as db:
+            audit = db.scalar(select(Audit).where(
+                Audit.audit_id == audit_id, Audit.organization_id == organization_id
+            ))
+            if audit is None:
+                raise AuditNotFoundError("audit_not_found", "Audit not found")
+            pinned = audit.version_refs.get("knowledge_pack_version_id")
+        if pinned is None:
+            return load_validated_knowledge_pack(profile_version_id)
+        try:
+            pack = load_validated_knowledge_pack_by_version(UUID(pinned))
+        except (TypeError, ValueError):
+            raise AuditConflictError(
+                "audit_version_conflict", "Audit processing versions are already pinned differently"
+            ) from None
+        if pack.profile_version_id != profile_version_id:
+            raise AuditConflictError(
+                "audit_version_conflict", "Audit processing versions are already pinned differently"
+            )
+        return pack
 
     def _begin_processing(self, audit_id: UUID, organization_id: UUID) -> None:
         with self._factory() as db:

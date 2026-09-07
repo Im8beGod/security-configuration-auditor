@@ -165,7 +165,7 @@ def test_fact_identity_and_full_provenance_are_stable():
     assert fact.evidence_refs[0].start_line == fact.evidence_refs[0].end_line == 2
     assert fact.evidence_refs[0].source_path == "semantic.cfg"
     assert fact.mapping_id is not None and fact.mapping_version_id is not None
-    assert fact.knowledge_pack_version_id == UUID("17e3e913-17df-53bf-b8c1-5cae4bfa133e")
+    assert fact.knowledge_pack_version_id == UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
     assert fact.state == FactState.EXPLICIT
     assert fact.extraction_method == InterpretationMethod.DECLARATIVE_MAPPING
     assert fact.validation_status == FactValidationStatus.VALIDATED
@@ -182,3 +182,36 @@ def test_repeated_destinations_remain_independent():
     assert len(logging) == 2
     assert logging[0].fact_id != logging[1].fact_id
     assert _facts(result, "time.ntp.server")[0].value.value == "time.example.invalid"
+
+
+def test_recognized_negation_is_preserved_without_inventing_a_default():
+    _ir, result = _interpret(
+        "no ip ssh version\n"
+        "no logging host 192.0.2.10\n"
+        "no ntp server time.example.invalid\n"
+        "line vty 0 4\n"
+        " no exec-timeout\n"
+        " no transport input\n"
+    )
+
+    reset_facts = [
+        item for item in result.facts if item.value.type is TypedValueType.NULL
+    ]
+    assert {item.field_id for item in reset_facts} == {
+        "management.remote.ssh.version",
+        "management.session.idle_timeout",
+        "management.remote.telnet.enabled",
+        "management.remote.ssh.enabled",
+    }
+    assert all(item.value.value is None for item in reset_facts)
+    assert all(item.state is FactState.UNKNOWN for item in reset_facts)
+    assert all(item.validation_status is FactValidationStatus.UNRESOLVED for item in reset_facts)
+    assert all(item.interpretation_confidence is InterpretationConfidence.UNRESOLVED for item in reset_facts)
+    assert [item.value.value for item in _facts(result, "logging.remote.destination")] == ["192.0.2.10"]
+    assert [item.value.value for item in _facts(result, "time.ntp.server")] == ["time.example.invalid"]
+
+
+def test_unsupported_negation_is_not_fabricated_as_a_known_event():
+    _ir, result = _interpret("line vty 0 4\n no transport input telnet\n")
+    assert result.facts == ()
+    assert {item.code for item in result.diagnostics} == {"unsupported_negation"}

@@ -28,7 +28,7 @@ def database_settings() -> Settings:
 def test_base_has_current_identity_metadata() -> None:
     assert Base.metadata is not None
     assert set(Base.metadata.tables) == {
-        "artifacts", "audits", "devices", "jobs", "organizations", "security_facts",
+        "artifacts", "audits", "devices", "effective_states", "jobs", "organizations", "security_facts",
         "snapshots", "users"
     }
 

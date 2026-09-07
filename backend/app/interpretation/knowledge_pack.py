@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import Enum
 from uuid import UUID
 
 from app.security_model import FIELD_REGISTRY, TypedValueType
@@ -14,6 +15,14 @@ COMMAND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,99}$")
 
 class KnowledgePackValidationError(ValueError):
     pass
+
+
+class NegationBehavior(str, Enum):
+    """Bounded semantic operation declared by a versioned mapping."""
+
+    UNSUPPORTED = "unsupported"
+    RESET_TO_DEFAULT = "reset_to_default"
+    REMOVE_VALUE = "remove_value"
 
 
 @dataclass(frozen=True)
@@ -33,6 +42,9 @@ class DeclarativeMapping:
     extractor: str
     scope_resolver: str
     declared_value_types: frozenset[TypedValueType]
+    negation_behavior: NegationBehavior = NegationBehavior.UNSUPPORTED
+    reset_mapping_version_id: UUID | None = None
+    removal_mapping_version_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +114,16 @@ def validate_knowledge_pack(
             or not mapping.declared_value_types <= field.expected_types
         ):
             raise KnowledgePackValidationError("Mapping value type is incompatible with field")
+        if not isinstance(mapping.negation_behavior, NegationBehavior):
+            raise KnowledgePackValidationError("Mapping negation behavior is invalid")
+        if mapping.reset_mapping_version_id is not None and not isinstance(
+            mapping.reset_mapping_version_id, UUID
+        ):
+            raise KnowledgePackValidationError("Mapping reset version is invalid")
+        if mapping.removal_mapping_version_id is not None and not isinstance(
+            mapping.removal_mapping_version_id, UUID
+        ):
+            raise KnowledgePackValidationError("Mapping removal version is invalid")
         if scope_type not in field.allowed_scope_types:
             raise KnowledgePackValidationError("Mapping scope is incompatible with field")
         _validate_matcher(mapping.matcher)

@@ -65,11 +65,13 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
     assert not CISCO_IOS_XE_17.version_constraint.accepts("16.12.5")
     assert CISCO_IOS_XE_17.capabilities == {
         "profile_detection", "structural_parsing", "semantic_interpretation",
+        "effective_state_resolution",
     }
     coverage = CISCO_IOS_XE_17.coverage_manifest
     assert coverage["profile_detection"] is True
     assert coverage["structural_parsing"] is True
     assert coverage["semantic_interpretation"] is True
+    assert coverage["effective_state_resolution"] is True
     assert coverage["supported_version_family"] == "IOS XE 17.x"
     assert coverage["structural_reader"] == "indentation_cli.v1"
     assert set(coverage["canonical_fields"]) == {
@@ -87,9 +89,9 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "logging host <ip-or-hostname>",
         "ntp server <ip-or-hostname>",
     )
-    assert "no EffectiveState or documented defaults" in coverage["limitations"]
+    assert "no documented defaults, inheritance, references, or bindings" in coverage["limitations"]
     assert CISCO_IOS_XE_17.structural_reader_name == "indentation_cli.v1"
-    assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.0.0"
+    assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.1.0"
 
 
 def test_explicit_ios_xe_17_version_selects_stable_supported_profile():

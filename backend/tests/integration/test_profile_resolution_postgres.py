@@ -55,7 +55,7 @@ def test_profile_resolution_persists_atomically_with_tenant_and_snapshot_boundar
 
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0005"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_0006"
 
         suffix = uuid4().hex
         first_org, first_user = bootstrap_admin(

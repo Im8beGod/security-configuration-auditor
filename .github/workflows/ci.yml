@@ -61,8 +61,8 @@ jobs:
       - name: Apply and verify migrations
         run: |
           alembic -c ../database/alembic.ini upgrade head
-          alembic -c ../database/alembic.ini heads | grep -F "20260907_0005 (head)"
-          alembic -c ../database/alembic.ini current | grep -F "20260907_0005 (head)"
+          alembic -c ../database/alembic.ini heads | grep -F "20260907_0006 (head)"
+          alembic -c ../database/alembic.ini current | grep -F "20260907_0006 (head)"
 
       - name: Run tests
         run: python -m pytest -v

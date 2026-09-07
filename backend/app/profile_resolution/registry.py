@@ -43,14 +43,16 @@ CISCO_IOS_XE_17 = ProfileManifest(
     device_classes=frozenset({DeviceClass.ROUTER, DeviceClass.SWITCH}),
     accepted_evidence_types=frozenset(ArtifactEvidenceType),
     structural_reader_name="indentation_cli.v1",
-    knowledge_pack_name="cisco_iosxe_17@1.0.0",
+    knowledge_pack_name="cisco_iosxe_17@1.1.0",
     capabilities=frozenset({
         "profile_detection", "structural_parsing", "semantic_interpretation",
+        "effective_state_resolution",
     }),
     coverage_manifest=MappingProxyType({
         "profile_detection": True,
         "structural_parsing": True,
         "semantic_interpretation": True,
+        "effective_state_resolution": True,
         "supported_version_family": "IOS XE 17.x",
         "structural_reader": "indentation_cli.v1",
         "canonical_fields": (
@@ -70,7 +72,7 @@ CISCO_IOS_XE_17 = ProfileManifest(
         ),
         "limitations": (
             "incomplete Cisco grammar",
-            "no EffectiveState or documented defaults",
+            "no documented defaults, inheritance, references, or bindings",
             "no inheritance, override, or conflict resolution",
             "no compliance rules, Findings, or remediation",
         ),

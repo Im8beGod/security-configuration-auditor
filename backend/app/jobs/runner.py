@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings, get_settings
 from app.db.session import get_session_factory
 from app.jobs.enums import JobType
-from app.jobs.handlers import handle_mapping_validation, handle_pdf_generation, handle_reevaluation, handle_system_noop
+from app.ingestion.storage import create_artifact_storage
+from app.jobs.handlers import AuditJobHandler, handle_mapping_validation, handle_pdf_generation, handle_reevaluation, handle_system_noop
 from app.jobs.service import claim_next_job, complete_job, fail_job
 
 
@@ -108,8 +109,13 @@ class WorkerRuntime:
 
 def create_worker_runtime(settings: Settings | None = None) -> WorkerRuntime:
     runtime_settings = settings or get_settings()
+    factory = get_session_factory()
+    handlers = dict(PRODUCTION_HANDLERS)
+    handlers[JobType.AUDIT] = AuditJobHandler(
+        factory, create_artifact_storage(runtime_settings)
+    )
     return WorkerRuntime(
-        get_session_factory(),
-        handlers=PRODUCTION_HANDLERS,
+        factory,
+        handlers=handlers,
         poll_interval_seconds=runtime_settings.worker_poll_interval_seconds,
     )

@@ -10,7 +10,8 @@ from app.jobs.handlers.pdf_generation import handle_pdf_generation
 from app.jobs.handlers.mapping_validation import handle_mapping_validation
 from app.jobs.handlers.reevaluation import handle_reevaluation
 from app.jobs.handlers.system_noop import handle_system_noop
-from app.jobs.runner import PRODUCTION_HANDLERS, WorkerRuntime
+from app.jobs.handlers.audit import AuditJobHandler
+from app.jobs.runner import PRODUCTION_HANDLERS, WorkerRuntime, create_worker_runtime
 from app.jobs.service import enqueue_job
 
 
@@ -18,6 +19,34 @@ def test_production_handlers_are_explicit_and_noop_is_side_effect_free():
     job_id = uuid4()
     assert handle_system_noop(job_id) is None
     assert PRODUCTION_HANDLERS == {JobType.SYSTEM_NOOP: handle_system_noop, JobType.PDF_GENERATION: handle_pdf_generation, JobType.MAPPING_VALIDATION: handle_mapping_validation, JobType.RE_EVALUATION: handle_reevaluation}
+
+
+def test_create_worker_runtime_registers_real_audit_handler_and_claims_audit_job(
+    job_factory, auth_settings, monkeypatch
+):
+    storage = object()
+    monkeypatch.setattr("app.jobs.runner.get_session_factory", lambda: job_factory)
+    monkeypatch.setattr("app.jobs.runner.create_artifact_storage", lambda settings: storage)
+    observed = []
+    monkeypatch.setattr(AuditJobHandler, "__call__", lambda _self, job_id: observed.append(job_id))
+
+    runtime = create_worker_runtime(auth_settings)
+    assert isinstance(runtime._handlers[JobType.AUDIT], AuditJobHandler)
+    assert runtime._handlers[JobType.AUDIT].storage is storage
+    assert runtime.supported_job_types == frozenset({
+        JobType.AUDIT, JobType.SYSTEM_NOOP, JobType.PDF_GENERATION,
+        JobType.MAPPING_VALIDATION, JobType.RE_EVALUATION,
+    })
+    assert JobType.BULK_REPORT_GENERATION not in runtime.supported_job_types
+
+    with job_factory.begin() as db:
+        job_id = enqueue_job(db, JobType.AUDIT).job_id
+    assert runtime.run_iteration() is True
+    assert observed == [job_id]
+    with job_factory() as db:
+        job = db.get(Job, job_id)
+        assert job.status == JobStatus.COMPLETED
+        assert job.attempt_count == 1
 
 
 def test_production_runtime_waits_when_only_unsupported_jobs_exist(job_factory):

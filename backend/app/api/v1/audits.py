@@ -8,9 +8,14 @@ from app.audit.errors import (
     AuditConflictError, AuditInfrastructureError, AuditNotFoundError,
     AuditValidationError,
 )
-from app.audit.schemas import AuditCreate, AuditResponse, JobSummary, ReevaluationEligibilityResponse, ReevaluationRequest
+from app.audit.schemas import (
+    AuditCreate, AuditResponse, BatchAuditCreate, BatchAuditItemResponse,
+    BatchAuditResponse, JobSummary, ReevaluationEligibilityResponse,
+    ReevaluationRequest,
+)
 from app.audit.service import (
-    create_audit, get_audit, get_audit_job, list_audits, start_audit,
+    create_audit, create_batch_audits, get_audit, get_audit_job, list_audits,
+    start_audit,
 )
 from app.reevaluation.service import eligibility as reevaluation_eligibility, history as reevaluation_history, start as start_reevaluation
 from app.auth.dependencies import get_current_user, require_roles
@@ -60,6 +65,20 @@ def create_audit_endpoint(
         AuditInfrastructureError,
     ) as error:
         raise _translate(error) from None
+
+
+@router.post("/batch", response_model=BatchAuditResponse)
+def create_batch_audits_endpoint(
+    request: BatchAuditCreate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BatchAuditResponse:
+    results = create_batch_audits(db, user, request)
+    return BatchAuditResponse(
+        accepted=sum(item["status"] == "accepted" for item in results),
+        rejected=sum(item["status"] == "rejected" for item in results),
+        results=[BatchAuditItemResponse.model_validate(item) for item in results],
+    )
 
 
 @router.get("", response_model=list[AuditResponse])

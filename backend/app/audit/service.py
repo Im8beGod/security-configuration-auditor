@@ -8,7 +8,7 @@ from app.audit.errors import (
     AuditConflictError, AuditInfrastructureError, AuditNotFoundError,
     AuditValidationError,
 )
-from app.audit.schemas import AuditCreate
+from app.audit.schemas import AuditCreate, BatchAuditCreate
 from app.db.models import (
     Artifact, Audit, AuditReevaluationReason, AuditStatus, Device, Job,
     Snapshot, SnapshotStatus, User,
@@ -77,6 +77,43 @@ def create_audit(db: Session, user: User, request: AuditCreate) -> Audit:
         raise AuditInfrastructureError("audit_persistence_failed", "Audit could not be created") from None
     db.refresh(audit)
     return audit
+
+
+def create_batch_audits(db: Session, user: User, request: BatchAuditCreate) -> list[dict]:
+    """Coordinate independent create/run operations without a batch persistence model."""
+    results = []
+    for item in request.items:
+        try:
+            snapshot = db.scalar(select(Snapshot).where(
+                Snapshot.snapshot_id == item.snapshot_id,
+                Snapshot.organization_id == user.organization_id,
+            ))
+            if snapshot is None:
+                raise AuditNotFoundError("snapshot_not_found", "Snapshot not found")
+            if snapshot.device_id != item.device_id:
+                raise AuditValidationError(
+                    "snapshot_device_mismatch", "Snapshot does not belong to device"
+                )
+            audit = create_audit(db, user, AuditCreate(
+                snapshot_id=item.snapshot_id,
+                selected_frameworks=item.selected_frameworks,
+            ))
+            queued, job = start_audit(db, user, audit.audit_id)
+            results.append({
+                "status": "accepted", "device_id": item.device_id,
+                "snapshot_id": item.snapshot_id, "audit_id": queued.audit_id,
+                "job_id": job.job_id,
+            })
+        except (
+            AuditNotFoundError, AuditConflictError, AuditValidationError,
+            AuditInfrastructureError,
+        ) as error:
+            results.append({
+                "status": "rejected", "device_id": item.device_id,
+                "snapshot_id": item.snapshot_id, "error_code": error.code,
+                "error_message": error.message,
+            })
+    return results
 
 
 def list_audits(db: Session, user: User) -> list[Audit]:

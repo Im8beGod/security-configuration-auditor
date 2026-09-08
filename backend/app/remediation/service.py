@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import Audit, Finding, RemediationProcedure, RemediationProcedureStatus, User
 from app.findings.service import FindingNotFoundError, _finding
+from app.remediation.catalog import REVIEWED_CISCO_PROCEDURES_BY_RULE
 
 class RemediationError(ValueError): pass
 _PLACEHOLDER = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
@@ -43,9 +44,13 @@ def _select(db, finding, audit):
     else:
         candidates = list(db.scalars(select(RemediationProcedure).where(RemediationProcedure.rule_id == finding.rule_id, RemediationProcedure.status == RemediationProcedureStatus.PUBLISHED)))
         applicable = [candidate for candidate in candidates if _applicable(candidate, finding, audit)[0]]
-        if not applicable: return None, "no_published_procedure", None
-        if len(applicable) != 1: return None, "ambiguous_procedure", None
-        procedure, source = applicable[0], "published_registry_resolution"
+        if not applicable:
+            procedure = REVIEWED_CISCO_PROCEDURES_BY_RULE.get(finding.rule_id)
+            if procedure is None: return None, "no_published_procedure", None
+            source = "built_in_reviewed_catalog"
+        elif len(applicable) != 1: return None, "ambiguous_procedure", None
+        else:
+            procedure, source = applicable[0], "published_registry_resolution"
     try: _validate_procedure(procedure)
     except RemediationError as error: return None, str(error), None
     ok, reason = _applicable(procedure, finding, audit)
@@ -55,7 +60,7 @@ def _response(finding, procedure=None, reason=None, source=None):
     if finding.verdict != FindingVerdict.FAIL: return {"status": "not_required", "reason": "non_fail_verdict", "finding_id": finding.finding_id}
     if not procedure: return {"status": "unavailable", "reason": reason, "finding_id": finding.finding_id}
     required = [item for item in procedure.required_parameters if item.get("required", True)]
-    return {"status": "requires_parameters" if required else "applicable", "reason": None, "finding_id": finding.finding_id, "procedure_id": procedure.procedure_id, "procedure_key": procedure.procedure_key, "procedure_version": procedure.version, "title": procedure.title, "security_objective": procedure.security_objective, "description": procedure.description, "profile_applicability": procedure.profile_applicability, "prerequisites": procedure.prerequisites, "safety_warnings": procedure.safety_warnings, "required_parameters": procedure.required_parameters, "configuration_context": procedure.configuration_context, "ordered_steps": procedure.ordered_steps, "verification_steps": procedure.verification_steps, "rollback_steps": procedure.rollback_steps, "source_references": procedure.source_references, "selection_source": source}
+    return {"status": "requires_parameters" if required else "applicable", "reason": None, "finding_id": finding.finding_id, "procedure_id": procedure.procedure_id, "procedure_key": procedure.procedure_key, "procedure_version": procedure.version, "title": procedure.title, "security_objective": procedure.security_objective, "description": procedure.description, "profile_applicability": procedure.profile_applicability, "prerequisites": procedure.prerequisites, "safety_warnings": procedure.safety_warnings, "required_parameters": procedure.required_parameters, "configuration_context": procedure.configuration_context, "ordered_steps": procedure.ordered_steps, "verification_steps": procedure.verification_steps, "rollback_steps": procedure.rollback_steps, "source_references": procedure.source_references, "validation_results": procedure.validation_results, "reviewed_at": procedure.reviewed_at, "validated_at": procedure.validated_at, "selection_source": source}
 
 def get_remediation(db: Session, user: User, finding_id: UUID):
     finding = _finding(db, user, finding_id); audit = db.get(Audit, finding.audit_id)
@@ -68,7 +73,10 @@ def _value(definition, value):
     if kind in {"ip_address", "ip_network"}:
         try: return str(ipaddress.ip_address(value) if kind == "ip_address" else ipaddress.ip_network(value, strict=False))
         except ValueError: raise RemediationError("invalid_parameters") from None
-    if kind == "hostname" and re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", value): return value.lower()
+    if kind == "hostname":
+        try: return str(ipaddress.ip_address(value))
+        except ValueError: pass
+        if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", value): return value.lower()
     if kind in {"integer", "port"}:
         try: number = int(value)
         except ValueError: raise RemediationError("invalid_parameters") from None

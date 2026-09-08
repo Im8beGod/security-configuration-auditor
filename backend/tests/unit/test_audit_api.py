@@ -69,13 +69,13 @@ def login(client, email="audit-a@example.invalid"):
     assert response.status_code == 200
 
 
-def ready_snapshot(client):
-    device = client.post("/api/v1/devices", json={"display_name": "Audit Device"}).json()
+def ready_snapshot(client, *, display_name="Audit Device", contents=b"hostname audit\n"):
+    device = client.post("/api/v1/devices", json={"display_name": display_name}).json()
     snapshot = client.post(
         f"/api/v1/devices/{device['device_id']}/snapshots", json={}
     ).json()
     artifact = client.post("/api/v1/artifacts/upload", files={
-        "file": ("audit.cfg", b"hostname audit\n", "text/plain")
+        "file": ("audit.cfg", contents, "text/plain")
     }).json()
     assert client.post(
         f"/api/v1/snapshots/{snapshot['snapshot_id']}/artifacts/{artifact['artifact_id']}"
@@ -290,6 +290,75 @@ def test_create_initial_audit_is_honest_and_does_not_lock_snapshot(audit_context
     listed = client.get("/api/v1/audits").json()
     assert [item["audit_id"] for item in listed] == [body["audit_id"]]
     assert client.get(f"/api/v1/audits/{body['audit_id']}").status_code == 200
+
+
+def test_batch_audits_accept_two_devices_with_independent_jobs_and_snapshots(audit_context):
+    client, factory, *_ = audit_context
+    login(client)
+    cisco_device, cisco_snapshot, _ = ready_snapshot(
+        client, display_name="Cisco edge", contents=b"Cisco IOS XE Software, Version 17.9.4a\nhostname cisco\n"
+    )
+    fortios_device, fortios_snapshot, _ = ready_snapshot(
+        client, display_name="FortiOS edge", contents=b"FortiOS v7.4.3,build2573\nconfig system global\n"
+    )
+    response = client.post("/api/v1/audits/batch", json={"items": [
+        {"device_id": cisco_device["device_id"], "snapshot_id": cisco_snapshot["snapshot_id"], "selected_frameworks": ["NIST"]},
+        {"device_id": fortios_device["device_id"], "snapshot_id": fortios_snapshot["snapshot_id"], "selected_frameworks": ["NIST"]},
+    ]})
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["accepted"], body["rejected"]) == (2, 0)
+    assert all(item["status"] == "accepted" for item in body["results"])
+    assert len({item["audit_id"] for item in body["results"]}) == 2
+    assert len({item["job_id"] for item in body["results"]}) == 2
+    assert {item["device_id"] for item in body["results"]} == {cisco_device["device_id"], fortios_device["device_id"]}
+    with factory() as db:
+        audits = list(db.scalars(select(Audit).order_by(Audit.audit_id)))
+        jobs = list(db.scalars(select(Job).where(Job.job_type == JobType.AUDIT)))
+        assert {str(audit.snapshot_id) for audit in audits} == {cisco_snapshot["snapshot_id"], fortios_snapshot["snapshot_id"]}
+        assert {audit.status for audit in audits} == {AuditStatus.QUEUED}
+        assert len(jobs) == 2 and {job.device_id for job in jobs} == {UUID(cisco_device["device_id"]), UUID(fortios_device["device_id"])}
+        assert all(db.get(Snapshot, UUID(snapshot_id)).status == SnapshotStatus.LOCKED for snapshot_id in (cisco_snapshot["snapshot_id"], fortios_snapshot["snapshot_id"]))
+
+
+def test_batch_audits_is_partial_and_rejects_cross_tenant_and_snapshot_mismatch(audit_context):
+    client, factory, _, first, second = audit_context
+    login(client)
+    valid_device, valid_snapshot, _ = ready_snapshot(client, display_name="Valid edge")
+    client.cookies.clear()
+    login(client, "audit-b@example.invalid")
+    foreign_device, foreign_snapshot, _ = ready_snapshot(client, display_name="Foreign edge")
+    client.cookies.clear()
+    login(client)
+    response = client.post("/api/v1/audits/batch", json={"items": [
+        {"device_id": valid_device["device_id"], "snapshot_id": valid_snapshot["snapshot_id"], "selected_frameworks": []},
+        {"device_id": valid_device["device_id"], "snapshot_id": foreign_snapshot["snapshot_id"], "selected_frameworks": []},
+        {"device_id": foreign_device["device_id"], "snapshot_id": valid_snapshot["snapshot_id"], "selected_frameworks": []},
+    ]})
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["accepted"], body["rejected"]) == (1, 2)
+    rejected = [item for item in body["results"] if item["status"] == "rejected"]
+    assert {item["error_code"] for item in rejected} == {"snapshot_not_found", "snapshot_device_mismatch"}
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(Audit)) == 1
+        assert db.scalar(select(func.count()).select_from(Job).where(Job.job_type == JobType.AUDIT)) == 1
+        assert db.get(Snapshot, UUID(valid_snapshot["snapshot_id"])).status == SnapshotStatus.LOCKED
+
+
+def test_batch_duplicate_item_is_rejected_without_duplicate_audit_or_job(audit_context):
+    client, factory, *_ = audit_context
+    login(client)
+    device, snapshot, _ = ready_snapshot(client, display_name="Duplicate-safe edge")
+    item = {"device_id": device["device_id"], "snapshot_id": snapshot["snapshot_id"], "selected_frameworks": []}
+    response = client.post("/api/v1/audits/batch", json={"items": [item, item]})
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["accepted"], body["rejected"]) == (1, 1)
+    assert next(item for item in body["results"] if item["status"] == "rejected")["error_code"] == "snapshot_not_ready"
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(Audit)) == 1
+        assert db.scalar(select(func.count()).select_from(Job).where(Job.job_type == JobType.AUDIT)) == 1
 
 
 def test_create_rejects_protected_fields_and_non_ready_snapshots(audit_context):

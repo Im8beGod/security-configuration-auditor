@@ -24,6 +24,32 @@ class AuditCreate(BaseModel):
         return normalized
 
 
+class BatchAuditItem(AuditCreate):
+    device_id: UUID
+
+
+class BatchAuditCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BatchAuditItem] = Field(min_length=2, max_length=50)
+
+
+class BatchAuditItemResponse(BaseModel):
+    status: str
+    device_id: UUID
+    snapshot_id: UUID
+    audit_id: UUID | None = None
+    job_id: UUID | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class BatchAuditResponse(BaseModel):
+    accepted: int
+    rejected: int
+    results: list[BatchAuditItemResponse]
+
+
 class JobSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

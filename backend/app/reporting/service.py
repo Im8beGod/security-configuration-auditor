@@ -14,6 +14,42 @@ from app.reporting.storage import ReportStorage
 class ReportingError(ValueError): pass
 class ReportNotFound(ReportingError): pass
 
+
+def _enum_value(value):
+    return value.value if hasattr(value, "value") else value
+
+
+def build_report_document(device: Device, audit: Audit, findings: list[dict]) -> dict:
+    """Build report data from persisted inventory and the immutable audit profile."""
+    profile = audit.profile_resolution or {}
+    device_class = profile.get("device_class") or _enum_value(device.device_class)
+    return {
+        "device": {"display_name": device.display_name},
+        "device_identification": {
+            "display_name": device.display_name,
+            "hostname": device.latest_hostname,
+            "vendor": profile.get("vendor"),
+            "product_family": profile.get("product_family"),
+            "os": profile.get("os"),
+            "os_version": profile.get("os_version"),
+            "device_class": device_class,
+            "model": profile.get("model"),
+            "serial_number": profile.get("serial_number") or device.stable_serial_number,
+            "asset_tag": device.asset_tag,
+        },
+        "audit": {
+            "audit_id": audit.audit_id,
+            "revision_number": audit.revision_number,
+            "status": audit.status.value,
+            "profile": audit.version_refs.get("device_profile_version_id")
+            or profile.get("profile_version_id"),
+            "verdict_counts": audit.verdict_counts,
+            "severity_counts": audit.severity_counts,
+            "coverage": audit.coverage,
+        },
+        "findings": findings,
+    }
+
 def create_report(db: Session, user: User, audit_id: UUID):
     audit = db.scalar(select(Audit).where(Audit.audit_id == audit_id, Audit.organization_id == user.organization_id))
     if not audit: raise ReportNotFound("Audit not found")
@@ -46,8 +82,7 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
     for item in findings:
         remediation = get_remediation(db, user, item.finding_id) if user else {"status":"unavailable","reason":"generator_identity_unavailable"}
         records.append({key: getattr(item,key).value if hasattr(getattr(item,key),"value") else getattr(item,key) for key in ("title","verdict","severity","expected_state","observed_state","explanation","affected_scope","framework_references","evidence_refs")} | {"remediation": remediation})
-    profile = audit.version_refs.get("device_profile_version_id") or audit.profile_resolution.get("profile_version_id")
-    pdf = build_device_compliance_pdf({"device":{"display_name":device.display_name}, "audit":{"audit_id":audit.audit_id,"revision_number":audit.revision_number,"status":audit.status.value,"profile":profile,"verdict_counts":audit.verdict_counts,"severity_counts":audit.severity_counts,"coverage":audit.coverage}, "findings":records})
+    pdf = build_device_compliance_pdf(build_report_document(device, audit, records))
     reference = storage.write(pdf, organization_id=report.organization_id, report_id=report.report_id)
     report.storage_reference=reference; report.sha256=hashlib.sha256(pdf).hexdigest(); report.byte_size=len(pdf); report.generated_at=utc_now(); report.status=ReportStatus.READY; db.flush()
     return report

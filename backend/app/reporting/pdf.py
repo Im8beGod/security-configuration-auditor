@@ -15,7 +15,21 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
     audit, device = document["audit"], document["device"]
     rows = [["Device", text(device.get("display_name"))], ["Audit", text(audit.get("audit_id"))], ["Revision", text(audit.get("revision_number"))], ["Status", text(audit.get("status"))], ["Pinned profile", text(audit.get("profile"))]]
     table = Table(rows, colWidths=[110, 350]); table.setStyle(TableStyle([("GRID", (0,0), (-1,-1), .25, colors.grey), ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#e9eef2")), ("VALIGN", (0,0), (-1,-1), "TOP")]))
-    story += [table, Spacer(1, 12), Paragraph("Persisted summaries", styles["Heading2"]), Paragraph(text({"verdicts": audit.get("verdict_counts"), "severities": audit.get("severity_counts"), "coverage": audit.get("coverage")}), styles["BodyText"]), PageBreak(), Paragraph("Findings", styles["Heading1"])]
+    identification = document.get("device_identification", {})
+    identity_rows = [["Field", "Value"]]
+    for label, key in (("Display name", "display_name"), ("Hostname", "hostname"),
+                       ("Vendor", "vendor"), ("Product family", "product_family"),
+                       ("OS / platform", "os"), ("Software version", "os_version"),
+                       ("Device type / class", "device_class"), ("Model", "model"),
+                       ("Serial number", "serial_number"), ("Asset tag", "asset_tag")):
+        identity_rows.append([label, text(identification.get(key))])
+    identity_table = Table(identity_rows, colWidths=[160, 300])
+    identity_table.setStyle(TableStyle([("GRID", (0,0), (-1,-1), .25, colors.grey),
+                                        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#e9eef2")),
+                                        ("VALIGN", (0,0), (-1,-1), "TOP")]))
+    story += [table, Spacer(1, 12), Paragraph("Device Identification", styles["Heading2"]),
+              identity_table, Spacer(1, 12), Paragraph("Persisted summaries", styles["Heading2"]),
+              Paragraph(text({"verdicts": audit.get("verdict_counts"), "severities": audit.get("severity_counts"), "coverage": audit.get("coverage")}), styles["BodyText"]), PageBreak(), Paragraph("Findings", styles["Heading1"])]
     for finding in document["findings"]:
         story += [Paragraph(text(finding["title"]), styles["Heading2"]), Paragraph(text({key: finding.get(key) for key in ("verdict", "severity", "expected_state", "observed_state", "explanation", "affected_scope", "framework_references", "evidence_refs")}), styles["BodyText"])]
         remediation = finding.get("remediation")

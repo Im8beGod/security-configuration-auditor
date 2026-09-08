@@ -1,278 +1,151 @@
-﻿# SIH 26155 — AI-Driven Multi-Vendor Network Security Compliance Auditor
+# AI-Driven Multi-Vendor Network Security Compliance Auditor
 
-Smart India Hackathon Problem Statement 26155.
+SIH 26155 is a bounded, evidence-first auditor for Cisco IOS XE 17.x and
+Fortinet FortiOS 7.x configuration evidence. It preserves supplied evidence,
+normalizes vendor meaning into shared security semantics, and produces
+deterministic, reviewable compliance results.
 
-## Purpose
-
-A centralized, AI-augmented, vendor-agnostic network security compliance
-auditor for heterogeneous network-device configuration evidence.
-
-The system will normalize vendor-specific configuration meaning, resolve
-effective security state, deterministically evaluate compliance requirements,
-preserve evidence and provenance, provide remediation guidance, and generate
-auditable reports.
-
-## Architecture
-
-The SIH prototype uses a modular monolith with one background worker system.
-
-Technology baseline:
-
-- React + TypeScript
-- Python + FastAPI
-- PostgreSQL 17 + JSONB
-- SQLAlchemy 2.x + Alembic
-- protected filesystem `ArtifactStorage`
-- Docker
-- Docker Compose
-
-Trusted future processing pipeline:
-
-Raw Configuration
-→ Structural IR
-→ Semantic Interpretation
-→ Canonical Security Facts
-→ Effective Security State
-→ Deterministic Compliance
-→ Findings
-→ Reports
-
-AI assists interpretation and adaptation but does not make trusted final
-compliance decisions.
-
-## Repository Structure
-
-- backend/ — FastAPI application and domain modules
-- frontend/ — React + TypeScript application
-- worker/ — background worker deployment boundary
-- database/ — migration and initialization structure
-- storage/ — runtime artifacts and reports
-- docs/ — architecture, contracts and development documentation
-- tests/ — future repository-wide tests
-- scripts/ — development automation
-- .github/ — GitHub Actions workflows
-
-## Prerequisites
-
-- Python 3.13+
-- Node.js
-- npm
-- Git
-- Docker Desktop
-- Docker Compose
-- GitHub CLI
-
-## Backend
-
-From the backend directory:
-
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    pip install -r requirements.txt
-    python -m pytest -v
-    uvicorn app.main:app --reload
-
-Health endpoint:
-
-    http://localhost:8000/health
-
-### Step 4A Artifact ingestion
-
-Authenticated clients can upload one evidence file with
-`POST /api/v1/artifacts/upload`, upload multiple files with
-`POST /api/v1/artifacts/bulk-upload`, and retrieve tenant-owned metadata with
-`GET /api/v1/artifacts/{artifact_id}`. Multipart fields are named `file` for the
-single endpoint and `files` for bulk.
-
-The initial validator accepts UTF-8 text, JSON, and XML. JSON and XML must be
-well-formed; XML DTD/entity declarations and binary input are rejected. Unknown
-vendor syntax in valid text is accepted and conservatively classified. This stage
-does not identify vendors, resolve profiles, interpret semantics, or evaluate
-compliance. Bulk responses report each filename's success or controlled failure,
-so one rejected file does not roll back successful siblings.
-
-Defaults are 10 MiB per file (`ARTIFACT_MAX_UPLOAD_BYTES=10485760`) and 20 files
-per bulk request (`ARTIFACT_MAX_BULK_FILES=20`).
-
-### Step 4B Device and Snapshot workflow
-
-A Device is a persistent logical asset identity, not a container for historical
-configuration, software, or vendor truth. Authenticated organization-scoped APIs
-support creating, listing, retrieving, and patching Device identity metadata:
-
-- `POST /api/v1/devices`
-- `GET /api/v1/devices`
-- `GET|PATCH /api/v1/devices/{device_id}`
-
-A Snapshot is the complete supplied Artifact evidence set for one Device at one
-point. Draft Snapshots can be created and inspected through:
-
-- `POST|GET /api/v1/devices/{device_id}/snapshots`
-- `GET|PATCH /api/v1/snapshots/{snapshot_id}`
-- `POST|DELETE /api/v1/snapshots/{snapshot_id}/artifacts/{artifact_id}`
-- `POST /api/v1/snapshots/{snapshot_id}/finalize`
-
-Membership edits are atomic and draft-only. `artifact_count` is recomputed from
-membership, and `snapshot_hash` is SHA-256 over the direct concatenation of the
-lexicographically sorted, fixed-length member Artifact SHA-256 values. The empty
-draft uses SHA-256 of empty bytes. Finalization requires at least one safely
-validated Artifact and moves the Snapshot from `draft` to `ready`; ready, locked,
-and archived Snapshots are read-only. Unknown evidence remains eligible when it
-was safely ingested. Tenant IDs, creator IDs, lifecycle status, counts, and hashes
-are backend-authoritative.
-
-Step 4B performs no vendor interpretation. Step 4C activates Audit creation and
-the transition that locks a Snapshot when its first Audit is submitted.
-
-### Step 4C Audit submission
-
-The implemented backend workflow now reaches durable Audit submission:
+## Product Flow
 
 ```text
-Upload -> Device -> Snapshot -> Audit -> queued PostgreSQL Job
+Configuration
+-> vendor/profile detection
+-> structural parsing
+-> canonical SecurityFacts
+-> EffectiveState
+-> deterministic compliance
+-> Findings/Evidence
+-> remediation/reporting
 ```
 
-Authenticated clients create an initial revision with `POST /api/v1/audits`, list
-or inspect Audits with `GET /api/v1/audits` and `GET /api/v1/audits/{audit_id}`,
-and submit a draft with `POST /api/v1/audits/{audit_id}/run`. Audit creation binds
-revision 1 to exactly one ready Snapshot but does not lock it. Starting the Audit
-atomically locks that Snapshot, moves the Audit to `queued`, and creates one
-durable `audit` Job. New evidence after this point requires a new Snapshot.
+Supported vendor readers are `indentation_cli.v1` for Cisco IOS XE and
+`fortios_cli.v1` for FortiOS. Both feed the same canonical facts, effective
+state, compliance engine, findings model, and report format.
 
-Audit responses include a safe associated Job summary when one exists. Job status
-is also available from `GET /api/v1/jobs/{job_id}` for the owning tenant. Internal
-payloads and unowned/system Jobs are not exposed.
+## Capabilities
 
-The current production worker intentionally supports only `system_noop`; it does
-not claim `audit` Jobs. Consequently, a submitted Audit and its Job truthfully
-remain queued with zero attempts until Step 5 provides real identification and
-parsing. Queued does not mean evaluated, and Step 4C creates no profiles,
-compliance verdicts, findings, or placeholder PASS/FAIL/UNKNOWN results.
+- Single-file and multi-file evidence upload
+- True multi-device batch auditing through `POST /api/v1/audits/batch`
+- Cisco IOS XE 17.x and FortiOS 7.x profile-aware processing
+- PASS, FAIL, and UNKNOWN verdicts with severity, evidence, and provenance
+- Findings mapped to selected NIST SP 800-53 Rev. 5 controls
+- Supervised Review Center for unresolved syntax and low-code mappings
+- Persistent immutable Knowledge Packs and validated publication workflow
+- Historical re-evaluation using the same evidence and a new immutable revision
+- Per-device PDF reports with identity and hardware details
+- Reviewed Cisco remediation preview catalog for SSH v2, remote logging, and NTP
 
-### Step 4D Browser workflow
+Snapshots, Artifacts, and Audit revisions are immutable at their respective
+lifecycle boundaries. Batch submission is stateless and returns per-device
+accepted or rejected results without introducing a persistent Batch model.
 
-The authenticated React application exposes the complete implemented workflow at
-`/uploads`, `/devices`, `/snapshots/:snapshotId`, `/audits`, and
-`/audits/:auditId`. Server state is managed with TanStack Query, detail routes
-refetch canonical state after refresh, and queued Job status is polled without
-simulating progress. The browser clearly distinguishes editable drafts, ready
-Snapshots, locked evidence, draft Audits, and queued submissions.
+## AI and Compliance Boundaries
 
-Step 4D adds no audit processor or compliance UI. Queued Audit Jobs remain queued
-until Step 5 supplies real vendor identification and parsing.
+An AI suggestion interface exists for optional mapping assistance. Suggestions
+are advisory, the production AI provider is not currently configured, and the
+deterministic manual workflow works without AI. AI never determines PASS,
+FAIL, or UNKNOWN.
 
-### Step 5 Configuration semantics
+Findings are **mapped to selected NIST SP 800-53 Rev. 5 controls**. This is a
+traceability mapping, not a claim of NIST compliance, certification, or full
+coverage. CIS, DISA STIG, and ISO mapping packs are not currently implemented.
 
-The backend now implements the bounded Step-5 domain pipeline:
+Reviewed Cisco procedures currently cover:
 
-```text
-Immutable Snapshot evidence
--> profile detection
--> indentation_cli.v1 Structural IR
--> validated Cisco IOS XE semantic mappings
--> persisted canonical SecurityFacts
+- SSH v2
+- Remote logging host
+- NTP server
+
+FortiOS remediation is deliberately unavailable pending publication of a
+reviewed procedure catalog. No remediation command is executed by the system.
+
+## Repository Layout
+
+- `backend/` - FastAPI application, domain services, worker handlers, and tests
+- `frontend/` - React and TypeScript application
+- `database/` - Alembic configuration and migrations
+- `storage/` - local development artifact and report mounts
+- `docs/` - architecture, demo, presentation, and development notes
+- `docker-compose.yml` - local backend, worker, frontend, and PostgreSQL stack
+
+## Setup
+
+Prerequisites: Python 3.13+, Node.js/npm, Docker Desktop, Docker Compose, and
+Git.
+
+```powershell
+Copy-Item .env.example .env
+# Replace development-only password and JWT values in .env.
+docker compose config --quiet
+docker compose up -d --build
+docker compose run --rm backend alembic -c database/alembic.ini upgrade head
 ```
 
-The initial profile is `cisco.ios_xe.17@1.0.0`, backed by knowledge pack
-`cisco_iosxe_17@1.0.0`. Supported facts cover VTY Telnet/SSH transport, VTY
-idle timeout, configured SSH version, remote logging destinations, and NTP
-servers. Audit processing pins the exact profile and knowledge-pack versions,
-retains artifact/line/IR-node provenance, and is idempotent for an immutable
-Audit and Snapshot.
+The frontend is available at `http://localhost:5173`; the API is available at
+`http://localhost:8000`, with health check `GET /health`. PostgreSQL is
+available to Compose services as `postgres:5432` and from the host as port
+`5433` by default.
 
-Step 5 leaves the Audit in `processing` at stage `interpreting`. It does not set
-`completed_at` or alter verdict, severity, or compliance coverage fields. The
-real audit Job adapter is implemented as a thin domain-service caller, but it is
-not registered in the production worker: the current Job lifecycle automatically
-marks every successful handler `completed`, while a canonical Audit cannot be
-complete before EffectiveState and compliance evaluation exist. Consequently,
-production audit Jobs remain queued without hot-loop claims or false completion.
+## Backend Development
 
-This is intentionally limited Cisco syntax support, not broad Cisco compliance
-support. EffectiveState, defaults, inheritance, precedence, compliance rules,
-Findings, remediation, and reporting remain unimplemented.
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m pytest tests/unit -q
+uvicorn app.main:app --reload
+```
 
-## Frontend
+## Frontend Development
 
-From the frontend directory:
+```powershell
+cd frontend
+npm ci
+npm run build
+npm run lint
+npm run dev
+```
 
-    npm ci
-    npm run build
-    npm run lint
-    npm run dev
+## Migrations and Verification
 
-Development URL:
+The current Alembic head is `20260908_0011`. Apply migrations explicitly; the
+backend and worker do not migrate the database automatically.
 
-    http://localhost:5173
+```powershell
+alembic -c database/alembic.ini heads
+alembic -c database/alembic.ini current
+python -m compileall backend/app backend/tests
+git diff --check
+```
 
-## Docker
+Focused backend tests cover profile resolution, both vendor readers, the
+deterministic compliance path, Review Center publication, remediation preview,
+reporting, re-evaluation, and the multi-device batch boundary. PostgreSQL
+integration tests are opt-in and document their required environment flags in
+the test files.
 
-Create the local environment file once, then replace the development-only
-password and JWT placeholders with values used only on your workstation:
+## Demo Quick Start
 
-    Copy-Item .env.example .env
+1. Start the Compose stack and apply migration head as shown above.
+2. Sign in with a bootstrapped administrator account.
+3. Upload Cisco and FortiOS configuration evidence and create one Snapshot per
+   device.
+4. Submit the two snapshots through the batch audit endpoint or the existing
+   audit workflow.
+5. Review PASS/FAIL/UNKNOWN findings, evidence, selected NIST mappings, and
+   the reviewed Cisco remediation preview.
+6. Open Review Center for unresolved syntax, publish only after validation and
+   administrator approval, then explicitly re-evaluate to create a new
+   immutable revision.
+7. Generate the per-device PDF report and show identity, hardware, findings,
+   and evidence.
 
-Validate, build, and start the four-service development environment:
+See [the demo script](docs/demo/DEMO_SCRIPT.md) and [the five-slide content](docs/presentation/SIH_5_SLIDE_CONTENT.md).
 
-    docker compose config --quiet
-    docker compose build
-    docker compose up -d
+## Security Notes
 
-Apply migrations explicitly after PostgreSQL is healthy. Neither the backend nor
-the worker runs migrations automatically:
-
-    docker compose run --rm backend alembic -c database/alembic.ini upgrade head
-
-Inspect service state and logs:
-
-    docker compose ps
-    docker compose logs backend worker frontend postgres
-
-Stop containers without deleting the persistent database volume:
-
-    docker compose down
-
-The browser frontend is available at `http://localhost:5173` and calls
-`http://localhost:8000/api/v1`. PostgreSQL uses `postgres:5432` inside
-Compose and host port `5433`. Backend and worker share the protected
-`./storage` bind mount. This Compose configuration is for local development,
-not production deployment.
-
-## Environment
-
-Use `.env.example` as the environment template.
-
-Real `.env` files, secrets, uploaded artifacts and generated reports must
-never be committed.
-
-## Current Status
-
-- Step 1 — Implementation Contracts: COMPLETE / FROZEN
-- Step 2 — Repository Setup: COMPLETE / FROZEN
-- Step 3 — Basic Platform Skeleton: COMPLETE / FROZEN
-- Step 4A — Secure Upload + Artifact Ingestion: IMPLEMENTED
-- Step 4B — Device + Snapshot Workflow: IMPLEMENTED
-- Step 4C — Audit Creation + Durable Job Orchestration: IMPLEMENTED
-- Step 4D — End-User Frontend Workflow: IMPLEMENTED
-- Step 5 — Profile Detection, Structural IR, and Semantic Facts: IMPLEMENTED
-
-The platform provides Organization/User persistence,
-HttpOnly-cookie authentication, backend RBAC roles (`analyst`,
-`mapping_admin`, and `admin`), an explicit bootstrap-admin command,
-PostgreSQL-backed durable jobs, and a persistent worker. There is no public
-registration. The production worker continues to handle only the
-`SYSTEM_NOOP` job type (persisted as `system_noop`); all real job types
-remain queued.
-
-The four local Compose services are `frontend`, `backend`, `worker`, and
-`postgres`. Current Alembic head is `20260907_0005`.
-
-Step 4 implements authenticated Artifact ingestion, Device identity, immutable
-Snapshot evidence grouping, Audit creation, durable Job submission, and the
-browser workflow connecting them. Starting an Audit locks its Snapshot; new
-evidence requires a new Snapshot. A queued Audit is only durable pending work,
-not an evaluated result.
-
-The application now processes supported IOS XE evidence through canonical
-SecurityFacts. It does **not** yet implement EffectiveState, compliance
-evaluation, Findings, remediation, or reports/PDF generation.
+All API reads and writes are organization-scoped. Evidence and report storage
+is protected, internal job payloads are not exposed through the public API, and
+real `.env` files, secrets, uploaded artifacts, reports, caches, and database
+dumps must never be committed.

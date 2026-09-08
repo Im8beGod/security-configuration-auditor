@@ -2,6 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit.errors import (
@@ -9,7 +10,7 @@ from app.audit.errors import (
     AuditValidationError,
 )
 from app.audit.schemas import (
-    AuditCreate, AuditResponse, BatchAuditCreate, BatchAuditItemResponse,
+    AssessmentPackResponse, AuditCreate, AuditResponse, BatchAuditCreate, BatchAuditItemResponse,
     BatchAuditResponse, JobSummary, ReevaluationEligibilityResponse,
     ReevaluationRequest,
 )
@@ -17,6 +18,8 @@ from app.audit.service import (
     create_audit, create_batch_audits, get_audit, get_audit_job, list_audits,
     start_audit,
 )
+from app.assessment_packs.service import compatible_packs
+from app.db.models import AuditAssessment, AssessmentPackVersion
 from app.reevaluation.service import eligibility as reevaluation_eligibility, history as reevaluation_history, start as start_reevaluation
 from app.auth.dependencies import get_current_user, require_roles
 from app.db.models import Audit, User, UserRole
@@ -49,6 +52,20 @@ def _response(db: Session, audit: Audit, job=None) -> AuditResponse:
     response = AuditResponse.model_validate(audit)
     if associated_job is not None:
         response.job = JobSummary.model_validate(associated_job)
+    requested = (audit.version_refs or {}).get("assessment_pack_version_id")
+    if requested:
+        pinned = db.scalar(select(AuditAssessment).where(AuditAssessment.audit_id == audit.audit_id))
+        if pinned is not None:
+            pack = db.get(AssessmentPackVersion, pinned.assessment_pack_version_id)
+            if pack is not None:
+                response.assessment = {
+                    "assessment_pack_version_id": str(pack.assessment_pack_version_id),
+                    "family": pack.family, "name": pack.name, "version": pack.version,
+                    "source_version_label": pack.source_version_label,
+                    "content_digest": pack.content_digest,
+                }
+        else:
+            response.assessment = {"assessment_pack_version_id": requested}
     return response
 
 
@@ -65,6 +82,21 @@ def create_audit_endpoint(
         AuditInfrastructureError,
     ) as error:
         raise _translate(error) from None
+
+
+@router.get("/assessment-packs", response_model=list[AssessmentPackResponse])
+def assessment_packs_endpoint(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    profile_version_id: str | None = None,
+) -> list[AssessmentPackResponse]:
+    rows = compatible_packs(db, user.organization_id, profile_version_id) if profile_version_id else list(
+        db.scalars(select(AssessmentPackVersion).where(
+            AssessmentPackVersion.status == "published",
+            (AssessmentPackVersion.organization_id == user.organization_id)
+            | (AssessmentPackVersion.organization_id.is_(None)),
+        ).order_by(AssessmentPackVersion.family, AssessmentPackVersion.name, AssessmentPackVersion.version)))
+    return [AssessmentPackResponse.model_validate(row) for row in rows]
 
 
 @router.post("/batch", response_model=BatchAuditResponse)

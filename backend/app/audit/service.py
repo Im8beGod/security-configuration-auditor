@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.assessment_packs.service import AssessmentPackError, validate_requested_pack
 from app.audit.errors import (
     AuditConflictError, AuditInfrastructureError, AuditNotFoundError,
     AuditValidationError,
@@ -40,6 +41,11 @@ def create_audit(db: Session, user: User, request: AuditCreate) -> Audit:
     )) is None:
         raise AuditValidationError("snapshot_identity_invalid", "Snapshot identity is inconsistent")
     validate_snapshot_evidence(db, snapshot)
+    if request.assessment_pack_version_id is not None:
+        try:
+            validate_requested_pack(db, user.organization_id, request.assessment_pack_version_id)
+        except AssessmentPackError as error:
+            raise AuditValidationError(error.code, error.message) from None
     if db.scalar(select(Audit.audit_id).where(
         Audit.snapshot_id == snapshot.snapshot_id, Audit.revision_number == 1
     )) is not None:
@@ -56,7 +62,10 @@ def create_audit(db: Session, user: User, request: AuditCreate) -> Audit:
         status=AuditStatus.DRAFT,
         processing_stage=None,
         selected_frameworks=request.selected_frameworks,
-        version_refs={},
+        version_refs=(
+            {"assessment_pack_version_id": str(request.assessment_pack_version_id)}
+            if request.assessment_pack_version_id is not None else {}
+        ),
         profile_resolution={},
         verdict_counts={},
         severity_counts={},
@@ -97,6 +106,7 @@ def create_batch_audits(db: Session, user: User, request: BatchAuditCreate) -> l
             audit = create_audit(db, user, AuditCreate(
                 snapshot_id=item.snapshot_id,
                 selected_frameworks=item.selected_frameworks,
+                assessment_pack_version_id=item.assessment_pack_version_id,
             ))
             queued, job = start_audit(db, user, audit.audit_id)
             results.append({

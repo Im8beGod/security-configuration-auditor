@@ -12,6 +12,7 @@ class AuditCreate(BaseModel):
 
     snapshot_id: UUID
     selected_frameworks: list[str] = Field(default_factory=list, max_length=50)
+    assessment_pack_version_id: UUID | None = None
 
     @field_validator("selected_frameworks")
     @classmethod
@@ -48,6 +49,21 @@ class BatchAuditResponse(BaseModel):
     accepted: int
     rejected: int
     results: list[BatchAuditItemResponse]
+
+
+class AssessmentPackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    assessment_pack_version_id: UUID
+    pack_key: str
+    family: str
+    name: str
+    version: int
+    profile_version_ids: list[str]
+    source_metadata: dict[str, object]
+    source_version_label: str
+    content_digest: str
+    status: str
 
 
 class JobSummary(BaseModel):
@@ -93,6 +109,7 @@ class AuditResponse(BaseModel):
     created_by: UUID | None
     schema_version: str
     job: JobSummary | None = None
+    assessment: dict[str, object] | None = None
 
 
 class ReevaluationRequest(BaseModel):

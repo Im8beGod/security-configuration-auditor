@@ -135,6 +135,20 @@ export interface Audit {
   created_by: string | null
   schema_version: string
   job: JobSummary | null
+  assessment: AssessmentPackSummary | null
+}
+
+export interface AssessmentPackSummary {
+  assessment_pack_version_id: string
+  pack_key?: string
+  family?: string
+  name?: string
+  version?: number
+  profile_version_ids?: string[]
+  source_metadata?: Record<string, unknown>
+  source_version_label?: string
+  content_digest?: string
+  status?: string
 }
 
 export type BatchAuditItemStatus = 'accepted' | 'rejected'

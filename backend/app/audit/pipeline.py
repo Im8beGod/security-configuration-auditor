@@ -13,6 +13,7 @@ from app.audit.errors import (
     AuditNotFoundError,
 )
 from app.audit.service import resolve_audit_profile
+from app.assessment_packs.service import AssessmentPackError, pin_assessment, persist_assessment_results
 from app.compliance.policy import PolicyRegistryError, select_policy_version
 from app.compliance.rule_registry import RULE_PACK_BY_PROFILE, RULE_REGISTRY, RuleRegistryError
 from app.compliance.service import ComplianceError, persist_audit_findings
@@ -69,6 +70,17 @@ class AuditPipelineCoordinator:
         ):
             self._finalize_failure(audit_id, organization_id, stage=AuditProcessingStage.IDENTIFYING)
             return AuditPipelineResult(resolution, None, None, None, tuple(stages))
+
+        with self._factory() as db:
+            audit = db.scalar(select(Audit).where(Audit.audit_id == audit_id, Audit.organization_id == organization_id))
+            if audit is None:
+                raise AuditNotFoundError("audit_not_found", "Audit not found")
+            try:
+                pin_assessment(db, audit, resolution.selected_profile_version_id)
+                self._commit(db, "assessment_pin_failed")
+            except AssessmentPackError as error:
+                db.rollback()
+                raise AuditConflictError(error.code, error.message) from None
 
         pack = self._load_audit_pack(
             audit_id, organization_id, resolution.selected_profile_version_id
@@ -141,6 +153,14 @@ class AuditPipelineCoordinator:
                 db, audit_id=audit_id, organization_id=organization_id, rule_pack=rule_pack,
                 organization_policy=policy, effective_states=persisted_states,
             )
+            try:
+                persist_assessment_results(
+                    db, audit_id=audit_id, organization_id=organization_id,
+                    profile_version_id=resolution.selected_profile_version_id,
+                    findings=findings,
+                )
+            except AssessmentPackError as error:
+                raise AuditConflictError(error.code, error.message) from None
             self._commit(db, "finding_persistence_failed")
         self._finalize(audit_id, organization_id, findings)
         return AuditPipelineResult(

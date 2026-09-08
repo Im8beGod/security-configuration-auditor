@@ -23,7 +23,7 @@ from app.db.models import (
 
 EXPECTED_TABLES = {
     "artifacts", "audits", "devices", "effective_states", "findings", "jobs", "organizations", "security_facts",
-    "snapshots", "users", "remediation_procedures", "reports", "unresolved_blocks", "mapping_versions", "mapping_validation_runs", "knowledge_packs", "knowledge_pack_versions"
+    "snapshots", "users", "remediation_procedures", "reports", "unresolved_blocks", "mapping_versions", "mapping_validation_runs", "knowledge_packs", "knowledge_pack_versions", "assessment_pack_versions", "assessment_obligations", "audit_assessments", "assessment_results"
 }
 
 

@@ -80,7 +80,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         with engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260908_0011"
+            ) == "20260908_0012"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(

@@ -42,6 +42,12 @@ from app.db.models.training import (
     UnresolvedReviewStatus,
     ValidationRunStatus,
 )
+from app.db.models.assessment import (
+    AssessmentObligation,
+    AssessmentPackVersion,
+    AssessmentResult,
+    AuditAssessment,
+)
 from app.jobs.enums import JobStatus, JobType
 
 __all__ = [
@@ -86,4 +92,8 @@ __all__ = [
     "UnresolvedBlock",
     "UnresolvedReviewStatus",
     "ValidationRunStatus",
+    "AssessmentObligation",
+    "AssessmentPackVersion",
+    "AssessmentResult",
+    "AuditAssessment",
 ]

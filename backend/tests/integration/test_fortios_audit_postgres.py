@@ -57,7 +57,7 @@ def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0012"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
             factory, "FortiOS E2E", f"fortios-e2e-{suffix}",

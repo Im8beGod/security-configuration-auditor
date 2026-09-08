@@ -148,6 +148,7 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
             ("Severity summary", format_counts(audit.get("severity_counts"))),
             ("Pinned profile", scalar(audit.get("profile"))),
             ("Coverage", format_readable(audit.get("coverage"))),
+            ("Assessment Pack", format_readable(audit.get("assessment"))),
         ]),
         Paragraph("Device identity", heading),
         labeled_table([

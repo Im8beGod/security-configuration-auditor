@@ -1,4 +1,4 @@
-import type { Artifact, Audit, BatchAuditResponse, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
+import type { Artifact, AssessmentPackSummary, Audit, BatchAuditResponse, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
 import { apiRequest } from './client'
 
 export const workflowKeys = {
@@ -12,6 +12,7 @@ export const workflowKeys = {
   job: (id: string) => ['jobs', id] as const,
   revisions: (id: string) => ['audits', id, 'revisions'] as const,
   reevaluation: (id: string) => ['audits', id, 'reevaluation-eligibility'] as const,
+  assessmentPacks: ['assessment-packs'] as const,
 }
 
 const json = (value: unknown) => JSON.stringify(value)
@@ -72,9 +73,14 @@ export async function getAudit(id: string): Promise<Audit> {
   return await apiRequest(`/audits/${id}`) as Audit
 }
 
-export async function createAudit(snapshotId: string): Promise<Audit> {
+export async function listAssessmentPacks(profileVersionId?: string): Promise<AssessmentPackSummary[]> {
+  const query = profileVersionId ? `?profile_version_id=${encodeURIComponent(profileVersionId)}` : ''
+  return await apiRequest(`/audits/assessment-packs${query}`) as AssessmentPackSummary[]
+}
+
+export async function createAudit(snapshotId: string, assessmentPackVersionId?: string): Promise<Audit> {
   return await apiRequest('/audits', {
-    method: 'POST', body: json({ snapshot_id: snapshotId, selected_frameworks: [] }),
+    method: 'POST', body: json({ snapshot_id: snapshotId, selected_frameworks: [], ...(assessmentPackVersionId ? { assessment_pack_version_id: assessmentPackVersionId } : {}) }),
   }) as Audit
 }
 
@@ -82,7 +88,7 @@ export async function runAudit(id: string): Promise<Audit> {
   return await apiRequest(`/audits/${id}/run`, { method: 'POST' }) as Audit
 }
 
-export async function createBatchAudits(items: Array<{ device_id: string; snapshot_id: string }>): Promise<BatchAuditResponse> {
+export async function createBatchAudits(items: Array<{ device_id: string; snapshot_id: string; assessment_pack_version_id?: string }>): Promise<BatchAuditResponse> {
   return await apiRequest('/audits/batch', {
     method: 'POST',
     body: json({ items: items.map((item) => ({ ...item, selected_frameworks: [] })) }),

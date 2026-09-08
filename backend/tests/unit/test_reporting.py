@@ -89,6 +89,24 @@ def test_pdf_contains_device_identification_and_missing_optional_values_are_safe
     assert document["findings"][0]["framework_references"] == ["NIST AU-8"]
 
 
+def test_pdf_projects_assessment_pack_and_transparent_coverage():
+    document = {
+        "device": {"display_name": "Synthetic test device"},
+        "device_identification": {"display_name": "Synthetic test device"},
+        "audit": {
+            "audit_id": "assessment-audit", "revision_number": 1, "profile": "cisco.ios_xe.17@1.0.0",
+            "verdict_counts": {"pass": 1}, "severity_counts": {"low": 1},
+            "coverage": {"selected_obligation_count": 3, "manual": 1, "unimplemented": 1},
+            "assessment": {"family": "TEST/INFRASTRUCTURE", "name": "Synthetic Management Baseline A", "version": 1, "content_digest": "a" * 64},
+        },
+        "findings": [],
+    }
+    pdf = build_device_compliance_pdf(document)
+    assert pdf.startswith(b"%PDF-")
+    assert document["audit"]["assessment"]["family"] == "TEST/INFRASTRUCTURE"
+    assert document["audit"]["coverage"]["manual"] == 1
+
+
 def test_pdf_wraps_long_content_and_keeps_ordered_remediation_data():
     finding = {
         "title": "Long finding",

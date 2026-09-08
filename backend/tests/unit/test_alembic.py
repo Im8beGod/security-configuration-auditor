@@ -21,6 +21,7 @@ STEP_9_1_REVISION = "20260907_0008"
 STEP_9_2_REVISION = "20260907_0009"
 STEP_10A_REVISION = "20260907_0010"
 STEP_11_1_REVISION = "20260908_0011"
+ASSESSMENT_PACK_REVISION = "20260908_0012"
 
 
 def get_script_directory() -> ScriptDirectory:
@@ -37,11 +38,11 @@ def test_migration_history_extends_parentless_baseline() -> None:
     script = get_script_directory()
     revisions = list(script.walk_revisions())
 
-    assert script.get_heads() == [STEP_11_1_REVISION]
-    assert len(revisions) == 11
-    expected = [STEP_11_1_REVISION, STEP_10A_REVISION, STEP_9_2_REVISION, STEP_9_1_REVISION, STEP_7_1_REVISION, STEP_6A_REVISION, STEP_5C_REVISION, STEP_3_9_REVISION, STEP_3_6_REVISION, CURRENT_REVISION, BASELINE_REVISION]
+    assert script.get_heads() == [ASSESSMENT_PACK_REVISION]
+    assert len(revisions) == 12
+    expected = [ASSESSMENT_PACK_REVISION, STEP_11_1_REVISION, STEP_10A_REVISION, STEP_9_2_REVISION, STEP_9_1_REVISION, STEP_7_1_REVISION, STEP_6A_REVISION, STEP_5C_REVISION, STEP_3_9_REVISION, STEP_3_6_REVISION, CURRENT_REVISION, BASELINE_REVISION]
     assert [item.revision for item in revisions] == expected
-    assert revisions[0].down_revision == STEP_10A_REVISION
+    assert revisions[0].down_revision == STEP_11_1_REVISION
     assert revisions[-1].down_revision is None
 
 
@@ -49,6 +50,7 @@ def test_canonical_metadata_has_identity_tables_and_naming_convention() -> None:
     assert set(Base.metadata.tables) == {
         "artifacts", "audits", "devices", "effective_states", "findings", "jobs", "organizations", "security_facts",
         "snapshots", "users", "remediation_procedures", "reports", "unresolved_blocks",
-        "mapping_versions", "mapping_validation_runs", "knowledge_packs", "knowledge_pack_versions"
+        "mapping_versions", "mapping_validation_runs", "knowledge_packs", "knowledge_pack_versions",
+        "assessment_pack_versions", "assessment_obligations", "audit_assessments", "assessment_results"
     }
     assert dict(Base.metadata.naming_convention) == NAMING_CONVENTION

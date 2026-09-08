@@ -11,8 +11,9 @@ from app.compliance.models import (
     deterministic_finding_id, deterministic_policy_version_id,
 )
 from app.compliance.policy import OrganizationPolicyRegistry, PolicyRegistryError
-from app.compliance.rule_registry import RULE_PACK, RuleRegistry, RuleRegistryError
+from app.compliance.rule_registry import FORTIOS_RULE_PACK, RULE_PACK, RuleRegistry, RuleRegistryError
 from app.compliance.verdicts import FindingVerdict
+from app.db.models import AuditStatus
 from app.effective_state import UnresolvedReason
 from app.profile_resolution import CISCO_IOS_XE_17
 from app.security_model import ScopeRef
@@ -61,6 +62,61 @@ def test_registry_is_versioned_immutable_and_fails_closed():
     changed = replace(RULE_PACK, rules=(replace(RULE_PACK.rules[0], title="Changed"), *RULE_PACK.rules[1:]))
     with pytest.raises(RuleRegistryError, match="content conflicts"):
         RuleRegistry((RULE_PACK, changed))
+
+
+def test_selected_nist_references_are_verified_and_not_verdict_logic():
+    expected = {
+        "management.telnet.disabled": ("AC-17", "Remote Access"),
+        "management.ssh.enabled": ("AC-17", "Remote Access"),
+        "management.ssh.version_2": ("AC-17", "Remote Access"),
+        "management.idle_timeout.maximum": ("AC-11", "Session Lock"),
+        "logging.remote.destination.configured": ("AU-12", "Audit Generation"),
+        "time.ntp.server.configured": ("AU-8", "Time Stamps"),
+    }
+    for pack in (RULE_PACK, FORTIOS_RULE_PACK):
+        for rule in pack.rules:
+            references = rule.framework_references
+            if rule.rule_id in expected:
+                control_id, title = expected[rule.rule_id]
+                assert references == ({
+                    "framework": "NIST SP 800-53", "revision": "Rev. 5",
+                    "control_id": control_id, "control_title": title,
+                },)
+            else:
+                assert references == ()
+    ssh_rule = next(item for item in RULE_PACK.rules if item.rule_id == "management.ssh.enabled")
+    assert evaluate_condition(ssh_rule, _value("boolean", True)) is FindingVerdict.PASS
+    assert evaluate_condition(ssh_rule, _value("boolean", False)) is FindingVerdict.FAIL
+
+
+def test_framework_reference_validation_rejects_duplicates_and_wrong_titles():
+    base = RULE_PACK.rules[0]
+    duplicate = replace(base, framework_references=(base.framework_references[0], base.framework_references[0]))
+    with pytest.raises(RuleRegistryError, match="duplicated"):
+        RuleRegistry((replace(RULE_PACK, rules=(duplicate, *RULE_PACK.rules[1:])),))
+    wrong_title = replace(base, framework_references=({
+        "framework": "NIST SP 800-53", "revision": "Rev. 5",
+        "control_id": "AC-17", "control_title": "Invented title",
+    },))
+    with pytest.raises(RuleRegistryError, match="verified"):
+        RuleRegistry((replace(RULE_PACK, rules=(wrong_title, *RULE_PACK.rules[1:])),))
+
+
+def test_unknown_verdict_is_independent_of_nist_reference():
+    from app.compliance.service import evaluate_audit_compliance
+
+    audit = SimpleNamespace(
+        audit_id=UUID(int=10), device_id=UUID(int=11), status=AuditStatus.PROCESSING,
+        profile_resolution={"resolution_status": "resolved", "profile_version_id": RULE_PACK.profile_version_id},
+    )
+    db = SimpleNamespace(scalar=lambda _statement: audit)
+    drafts = evaluate_audit_compliance(
+        db, audit_id=audit.audit_id, organization_id=UUID(int=12), rule_pack=RULE_PACK,
+        organization_policy=None, effective_states=(),
+    )
+    unknown = next(item for item in drafts if item.rule_id == "management.ssh.enabled")
+    assert unknown.verdict is FindingVerdict.UNKNOWN
+    assert unknown.framework_references[0]["control_id"] == "AC-17"
 
 
 def test_unsupported_operator_and_typed_value_fail_closed():

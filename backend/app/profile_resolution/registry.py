@@ -77,7 +77,7 @@ CISCO_IOS_XE_17 = ProfileManifest(
             "no documented defaults, inheritance, references, or bindings",
             "no inheritance, override, or conflict resolution",
             "internal Cisco IOS XE technical baseline only (eight bounded rules)",
-            "no CIS, STIG, NIST, ISO mappings, remediation, or reporting",
+            "selected NIST SP 800-53 Rev. 5 mappings only; no CIS, STIG, ISO mappings, remediation, or reporting",
         ),
     }),
 )

@@ -137,5 +137,6 @@ ntp server 192.0.2.20
         fortios_value = effective_value(fortios_facts)
         cisco_rule = next(rule for rule in RULE_PACK.rules if rule.rule_id == rule_id)
         fortios_rule = next(rule for rule in FORTIOS_RULE_PACK.rules if rule.rule_id == rule_id)
+        assert cisco_rule.framework_references == fortios_rule.framework_references
         parameter = 900 if "idle_timeout" in rule_id else None
         assert evaluate_condition(cisco_rule, cisco_value, parameter) == evaluate_condition(fortios_rule, fortios_value, parameter)

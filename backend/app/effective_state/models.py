@@ -203,6 +203,14 @@ def _validate_scope(scope: ScopeRef) -> None:
                 )
             )
         )
+    elif scope.type in {"interface", "administrator"}:
+        label = "interface" if scope.type == "interface" else "administrator"
+        name = dict(scope.attributes).get("name")
+        valid = (
+            isinstance(name, str) and bool(name)
+            and dict(scope.attributes) == {"name": name}
+            and scope.key == f"{label}:{name}"
+        )
     else:
         valid = False
     if not valid:

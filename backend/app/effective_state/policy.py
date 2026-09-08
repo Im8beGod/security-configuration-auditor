@@ -8,6 +8,9 @@ from uuid import UUID
 
 from app.interpretation.knowledge_pack import NegationBehavior
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
+from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1
+from app.knowledge_packs.fortios_7 import FORTIOS_7_KNOWLEDGE_PACK, FORTIOS_7_KNOWLEDGE_PACK_V1_1
+from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK, JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1
 from app.security_model import FIELD_REGISTRY
 
 from app.effective_state.exceptions import EffectiveStateValidationError
@@ -140,10 +143,42 @@ _LEGACY_MAPPING_POLICIES = tuple(
     )
     for field_id, mapping_version_id in LEGACY_MAPPING_VERSION_IDS.items()
 )
+
+
+def _declared_mapping_policies(*packs):
+    """Derive operations only from sealed built-in mapping declarations."""
+    policies = []
+    for pack in packs:
+        for mapping in pack.mappings:
+            policies.append(MappingOperationPolicy(
+                pack.knowledge_pack_version_id, mapping.mapping_version_id,
+                mapping.field_id, FactOperation.ASSIGN,
+            ))
+            if mapping.reset_mapping_version_id is not None:
+                policies.append(MappingOperationPolicy(
+                    pack.knowledge_pack_version_id, mapping.reset_mapping_version_id,
+                    mapping.field_id, FactOperation.RESET,
+                ))
+            if mapping.removal_mapping_version_id is not None:
+                policies.append(MappingOperationPolicy(
+                    pack.knowledge_pack_version_id, mapping.removal_mapping_version_id,
+                    mapping.field_id, FactOperation.REMOVE,
+                ))
+    return tuple(policies)
+
+
+_SEALED_PACK_MAPPING_POLICIES = _declared_mapping_policies(
+    CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1,
+    CISCO_IOS_XE_17_KNOWLEDGE_PACK,
+    FORTIOS_7_KNOWLEDGE_PACK_V1_1,
+    FORTIOS_7_KNOWLEDGE_PACK,
+    JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
+    JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+)
 MAPPING_OPERATION_POLICIES: Mapping[tuple[UUID, UUID], MappingOperationPolicy] = (
     MappingProxyType({
         (item.knowledge_pack_version_id, item.mapping_version_id): item
-        for item in _LEGACY_MAPPING_POLICIES + _FORTIOS_LEGACY_MAPPING_POLICIES + _FORTIOS_CURRENT_MAPPING_POLICIES + _ACTIVE_MAPPING_POLICIES + _ACTIVE_OPERATION_POLICIES
+        for item in _LEGACY_MAPPING_POLICIES + _FORTIOS_LEGACY_MAPPING_POLICIES + _FORTIOS_CURRENT_MAPPING_POLICIES + _ACTIVE_MAPPING_POLICIES + _ACTIVE_OPERATION_POLICIES + _SEALED_PACK_MAPPING_POLICIES
     })
 )
 

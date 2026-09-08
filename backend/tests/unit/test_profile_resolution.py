@@ -82,9 +82,15 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "management.remote.telnet.enabled",
         "management.remote.ssh.enabled",
         "management.remote.ssh.version",
+        "management.remote.source.restriction.configured",
         "management.session.idle_timeout",
+        "logging.enabled",
         "logging.remote.destination",
         "time.ntp.server",
+        "time.ntp.configured",
+        "time.ntp.authentication.enabled",
+        "time.ntp.authentication.key_id",
+        "time.ntp.authentication.trusted_key_id",
     }
     assert coverage["command_forms"] == (
         "transport input telnet|ssh|telnet ssh|ssh telnet|none",
@@ -92,10 +98,13 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "ip ssh version 1|2",
         "logging host <ip-or-hostname>",
         "ntp server <ip-or-hostname>",
+        "access-class <name> in (within line vty)",
+        "logging on",
+        "ntp authenticate|authentication-key <id>|trusted-key <id>",
     )
     assert "no documented defaults, inheritance, references, or bindings" in coverage["limitations"]
     assert CISCO_IOS_XE_17.structural_reader_name == "indentation_cli.v1"
-    assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.1.0"
+    assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.2.0"
 
 
 def test_explicit_ios_xe_17_version_selects_stable_supported_profile():

@@ -62,7 +62,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
 
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0013"
 
         suffix = uuid4().hex
         first_org, first_user = bootstrap_admin(
@@ -150,7 +150,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
         with factory() as db:
             first = interpret_audit(db, storage, audit_id, first_org)
             first_ids = {fact.fact_id for fact in first.facts}
-            assert len(first.facts) == 7
+            assert len(first.facts) == 8
             assert len(first.artifact_results) == 2
 
         with factory() as db:
@@ -158,7 +158,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
             assert {fact.fact_id for fact in second.facts} == first_ids
             assert db.scalar(select(func.count()).select_from(SecurityFact).where(
                 SecurityFact.audit_id == audit_id
-            )) == 7
+            )) == 8
             unresolved_count = db.scalar(select(func.count()).select_from(UnresolvedBlock).where(UnresolvedBlock.audit_id == audit_id))
             assert unresolved_count and unresolved_count > 0
             persisted = list_audit_security_facts(db, audit_id, first_org)
@@ -168,9 +168,10 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
                 "management.remote.ssh.enabled",
                 "management.remote.ssh.version",
                 "management.session.idle_timeout",
-                "logging.remote.destination",
-                "time.ntp.server",
-            }
+                    "logging.remote.destination",
+                    "time.ntp.server",
+                    "time.ntp.configured",
+                }
             assert {
                 ref["artifact_id"]
                 for fact in persisted

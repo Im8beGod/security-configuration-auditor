@@ -63,8 +63,15 @@ def test_semantic_fixture_produces_only_bounded_explicit_meaning():
     ssh_version = _facts(result, "management.remote.ssh.version")
     logging = _facts(result, "logging.remote.destination")
     ntp = _facts(result, "time.ntp.server")
+    source_restrictions = _facts(result, "management.remote.source.restriction.configured")
+    logging_enabled = _facts(result, "logging.enabled")
+    ntp_authentication = _facts(result, "time.ntp.authentication.enabled")
+    ntp_keys = _facts(result, "time.ntp.authentication.key_id")
+    ntp_trusted_keys = _facts(result, "time.ntp.authentication.trusted_key_id")
 
-    assert [(item.scope.key, item.value.value) for item in telnet] == [("vty:0-4", True)]
+    assert [(item.scope.key, item.value.value) for item in telnet] == [
+        ("vty:0-4", True), ("vty:5-15", False)
+    ]
     assert [(item.scope.key, item.value.value) for item in ssh] == [
         ("vty:0-4", True), ("vty:5-15", True)
     ]
@@ -82,9 +89,15 @@ def test_semantic_fixture_produces_only_bounded_explicit_meaning():
         TypedValueType.IP_ADDRESS, TypedValueType.STRING
     ]
     assert len(ntp) == 1 and ntp[0].value.value == "192.0.2.20"
-    assert len(result.facts) == 9
-    assert result.metrics.facts_produced == 9
-    assert result.metrics.nodes_matched == 8
+    assert [(item.scope.key, item.value.value) for item in source_restrictions] == [("vty:0-4", True)]
+    assert [item.value.value for item in logging_enabled] == [True]
+    assert [item.value.value for item in ntp_authentication] == [True]
+    assert [item.value.value for item in ntp_keys] == [10]
+    assert [item.value.value for item in ntp_trusted_keys] == [10]
+    assert [item.value.value for item in _facts(result, "time.ntp.configured")] == [True]
+    assert len(result.facts) == 16
+    assert result.metrics.facts_produced == 16
+    assert result.metrics.nodes_matched == 13
     assert "invalid_exec_timeout" in {item.code for item in result.diagnostics}
     assert "unsupported_negation" in {item.code for item in result.diagnostics}
     assert "unsupported_vty_scope" in {item.code for item in result.diagnostics}
@@ -94,8 +107,14 @@ def test_semantic_fixture_produces_only_bounded_explicit_meaning():
         "management.remote.ssh.enabled",
         "management.remote.ssh.version",
         "management.session.idle_timeout",
+        "management.remote.source.restriction.configured",
+        "logging.enabled",
         "logging.remote.destination",
         "time.ntp.server",
+        "time.ntp.configured",
+        "time.ntp.authentication.enabled",
+        "time.ntp.authentication.key_id",
+        "time.ntp.authentication.trusted_key_id",
     } for fact in result.facts)
     assert not hasattr(result, "effective_state")
     assert not hasattr(result, "findings")
@@ -104,7 +123,9 @@ def test_semantic_fixture_produces_only_bounded_explicit_meaning():
 
 def test_transport_variants_do_not_fabricate_absent_protocol_meaning():
     _ir, ssh_only = _interpret("line vty 0 4\n transport input ssh\n")
-    assert _facts(ssh_only, "management.remote.telnet.enabled") == []
+    assert [fact.value.value for fact in _facts(
+        ssh_only, "management.remote.telnet.enabled"
+    )] == [False]
     assert [fact.value.value for fact in _facts(
         ssh_only, "management.remote.ssh.enabled"
     )] == [True]
@@ -165,7 +186,7 @@ def test_fact_identity_and_full_provenance_are_stable():
     assert fact.evidence_refs[0].start_line == fact.evidence_refs[0].end_line == 2
     assert fact.evidence_refs[0].source_path == "semantic.cfg"
     assert fact.mapping_id is not None and fact.mapping_version_id is not None
-    assert fact.knowledge_pack_version_id == UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
+    assert fact.knowledge_pack_version_id == UUID("cac42149-9da9-5d13-94d7-12d2c9ae5b05")
     assert fact.state == FactState.EXPLICIT
     assert fact.extraction_method == InterpretationMethod.DECLARATIVE_MAPPING
     assert fact.validation_status == FactValidationStatus.VALIDATED

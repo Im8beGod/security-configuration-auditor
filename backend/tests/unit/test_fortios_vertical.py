@@ -65,6 +65,11 @@ def test_fortios_fixture_maps_canonical_fields_and_preserves_evidence():
     values = {(fact.field_id, fact.value.value) for fact in facts}
     assert ("management.remote.ssh.enabled", True) in values
     assert ("management.remote.telnet.enabled", False) in values
+    assert ("management.remote.https.enabled", True) in values
+    assert ("management.remote.tls.minimum_version", "tlsv1-2") in values
+    assert ("management.remote.source.restriction.configured", True) in values
+    assert ("management.remote.source.permitted_network", "192.0.2.0/24") in values
+    assert ("logging.enabled", True) in values
     assert ("management.session.idle_timeout", 600) in values
     assert ("logging.remote.destination", "192.0.2.10") in values
     assert ("time.ntp.server", "192.0.2.20") in values
@@ -114,6 +119,7 @@ def test_fortios_unset_uses_existing_effective_state_reset_semantics():
     assert {fact.field_id for fact in facts} == {
         "management.remote.telnet.enabled",
         "management.remote.ssh.enabled",
+        "management.remote.https.enabled",
     }
     assert all(fact.value.value is None for fact in facts)
     assert all(fact.validation_status.value == "unresolved" for fact in facts)
@@ -134,6 +140,40 @@ def test_fortios_facts_resolve_through_existing_effective_state_engine():
     resolved = {state.field_id: state.effective_value.value for state in states if state.effective_value is not None}
     assert resolved["management.remote.ssh.enabled"] is True
     assert resolved["time.ntp.server"][0]["value"] == "192.0.2.20"
+
+
+def test_fortios_management_facts_stay_in_their_interface_and_administrator_scopes():
+    facts = _facts("""config system interface
+ edit \"port1\"
+  set allowaccess ssh https
+ next
+ edit \"port2\"
+  set allowaccess telnet
+ next
+end
+config system admin
+ edit \"ops\"
+  set trusthost1 198.51.100.0 255.255.255.0
+ next
+end
+""")
+    persisted = [SimpleNamespace(
+        fact_id=item.fact_id, audit_id=item.audit_id, device_id=item.device_id,
+        field_id=item.field_id, value=item.value.to_dict(), scope=item.scope.to_dict(),
+        evidence_refs=[reference.to_dict() for reference in item.evidence_refs], dependencies=[],
+        knowledge_pack_version_id=item.knowledge_pack_version_id, mapping_version_id=item.mapping_version_id,
+    ) for item in facts]
+    states = resolve_security_facts(audit_id=CONTEXT.audit_id, device_id=CONTEXT.device_id, facts=persisted)
+    selected = {
+        (item.field_id, item.scope.key, item.effective_value.value if item.effective_value else None)
+        for item in states
+        if item.field_id in {"management.remote.ssh.enabled", "management.remote.source.restriction.configured"}
+    }
+    assert selected >= {
+        ("management.remote.ssh.enabled", "interface:port1", True),
+        ("management.remote.ssh.enabled", "interface:port2", False),
+        ("management.remote.source.restriction.configured", "administrator:ops", True),
+    }
 
 
 def test_cisco_and_fortios_equivalent_controls_share_canonical_compliance():

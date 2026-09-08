@@ -54,10 +54,12 @@ from app.interpretation.scopes import SCOPE_RESOLVER_TYPES, SCOPE_RESOLVERS
 from app.knowledge_packs.cisco_iosxe_17 import (
     CISCO_IOS_XE_17_KNOWLEDGE_PACK,
     CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1,
+    CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1,
 )
 from app.knowledge_packs.fortios_7 import (
     FORTIOS_7_KNOWLEDGE_PACK,
     FORTIOS_7_KNOWLEDGE_PACK_V1,
+    FORTIOS_7_KNOWLEDGE_PACK_V1_1,
 )
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
 from app.parsing.readers.xml_tree import XmlStructuralIR, XmlNode
@@ -87,8 +89,10 @@ KNOWLEDGE_PACKS_BY_VERSION = {
     pack.knowledge_pack_version_id: pack
     for pack in (
         CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1,
+        CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1,
         CISCO_IOS_XE_17_KNOWLEDGE_PACK,
         FORTIOS_7_KNOWLEDGE_PACK_V1,
+        FORTIOS_7_KNOWLEDGE_PACK_V1_1,
         FORTIOS_7_KNOWLEDGE_PACK,
     )
 }
@@ -137,8 +141,12 @@ def load_validated_knowledge_pack_by_version(
 ) -> KnowledgePack:
     """Load an immutable historical pack by its exact pinned identity."""
     pack = KNOWLEDGE_PACKS_BY_VERSION.get(knowledge_pack_version_id)
-    if pack is None and knowledge_pack_version_id == UUID("b3040000-0000-5000-8000-000000000018"):
-        pack = _junos_pack()
+    if pack is None and knowledge_pack_version_id in {
+        UUID("b3040000-0000-5000-8000-000000000018"),
+        UUID("b3050000-0000-5000-8000-000000000018"),
+    }:
+        from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1
+        pack = JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1 if knowledge_pack_version_id == JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1.knowledge_pack_version_id else _junos_pack()
     if pack is None:
         raise InterpretationValidationError(
             "knowledge_pack_unavailable", "No compatible knowledge pack is available"
@@ -421,7 +429,8 @@ def interpret_xml_structural_ir(
                 continue
             try:
                 value = extract_training(definition, captures)
-                typed = TypedValue(TypedValueType(definition.value_extraction.output_type), value)
+                value_type = TypedValueType(definition.value_extraction.output_type)
+                typed = TypedValue(value_type, value, unit="seconds" if value_type is TypedValueType.DURATION else None)
                 scope = ScopeRef(type=definition.scope_resolution.strategy, key="device", attributes={})
                 validate_field_value_scope(definition.target_field_id, typed, scope)
             except (KeyError, TypeError, ValueError, FieldRegistryValidationError):

@@ -109,6 +109,15 @@ def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
             artifact_ids = {item.artifact_id for item in artifacts}
             original_hash = snapshot.snapshot_hash
             original_artifact_hashes = {item.artifact_id: item.sha256 for item in artifacts}
+            if os.environ.get("SIH_B5_ACCEPTANCE_REPORT") == "1":
+                config_artifact_id = next(
+                    item.artifact_id for item in artifacts
+                    if item.evidence_type == ArtifactEvidenceType.CONFIGURATION
+                )
+                print(
+                    "B5_FORTIOS_PERSISTED_IDS "
+                    f"artifact={config_artifact_id} snapshot={snapshot_id} audit={audit_id} job=direct-pipeline"
+                )
 
         import app.interpretation.service as interpretation_service
         original_parse = interpretation_service.parse_artifact

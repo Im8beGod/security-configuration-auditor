@@ -54,9 +54,18 @@ def test_field_registry_accepts_registered_compatible_values_and_scopes():
         "management.remote.telnet.enabled",
         "management.remote.ssh.enabled",
         "management.remote.ssh.version",
+        "management.remote.https.enabled",
+        "management.remote.tls.minimum_version",
+        "management.remote.source.restriction.configured",
+        "management.remote.source.permitted_network",
         "management.session.idle_timeout",
+        "logging.enabled",
         "logging.remote.destination",
         "time.ntp.server",
+        "time.ntp.configured",
+        "time.ntp.authentication.enabled",
+        "time.ntp.authentication.key_id",
+        "time.ntp.authentication.trusted_key_id",
     }
 
 
@@ -89,7 +98,7 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
     assert pack.profile_id == "cisco.ios_xe.17"
     assert pack.profile_version_id == "cisco.ios_xe.17@1.0.0"
     assert pack.knowledge_pack_id == UUID("33ededa8-0c17-55e0-b104-302fc55de5b8")
-    assert pack.knowledge_pack_version_id == UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
+    assert pack.knowledge_pack_version_id == UUID("cac42149-9da9-5d13-94d7-12d2c9ae5b05")
     assert [item.mapping_id for item in pack.mappings] == [
         UUID("c2a81d5b-9591-5ecd-beee-46beb57acced"),
         UUID("bc2cc368-40eb-53ed-896e-5efd779359d3"),
@@ -97,6 +106,12 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
         UUID("98f4ebb2-a48e-51f0-8611-430e6987e212"),
         UUID("3363d69a-c3e8-53a8-844a-9146e7eee8e3"),
         UUID("3f7d8702-ed3f-5c11-ab86-34d057d95678"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b501"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b502"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b503"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b504"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b505"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b506"),
     ]
     assert [item.mapping_version_id for item in pack.mappings] == [
         UUID("4e5634f2-c0f2-529e-912f-e42139aed61e"),
@@ -105,6 +120,12 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
         UUID("4b13928b-98eb-5dc2-a739-d978d5c8bd95"),
         UUID("f112df12-f860-5fad-b013-7b89701d2fcf"),
         UUID("31eadc31-751e-5451-bdd7-2532a26c9710"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf501"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf502"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf503"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf504"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf505"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf506"),
     ]
 
 
@@ -126,7 +147,7 @@ def test_immutable_knowledge_pack_versions_remain_independently_loadable():
     assert legacy.mappings[0].mapping_version_id == current.mappings[0].mapping_version_id
     assert current.mappings[0].reset_mapping_version_id == UUID("e42c0eb2-1d5d-584a-b463-8ee80574a35c")
     assert fortios_legacy.version == "1.0.0"
-    assert fortios_current.version == "1.1.0"
+    assert fortios_current.version == "1.2.0"
     assert fortios_legacy.mappings[0].mapping_version_id != fortios_current.mappings[0].mapping_version_id
 
 

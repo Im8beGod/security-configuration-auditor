@@ -8,7 +8,7 @@ from app.interpretation.knowledge_pack import (
 from app.security_model import TypedValueType
 
 
-MAPPINGS = (
+B4_MAPPINGS = (
     DeclarativeMapping(
         mapping_id=UUID("c2a81d5b-9591-5ecd-beee-46beb57acced"),
         mapping_version_id=UUID("4e5634f2-c0f2-529e-912f-e42139aed61e"),
@@ -83,5 +83,64 @@ MAPPINGS = (
         declared_value_types=frozenset({TypedValueType.IP_ADDRESS, TypedValueType.STRING}),
         negation_behavior=NegationBehavior.REMOVE_VALUE,
         removal_mapping_version_id=UUID("cc7f73d2-e27e-5a57-896c-b4d322fc2c14"),
+    ),
+)
+
+
+MAPPINGS = B4_MAPPINGS + (
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b501"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf501"),
+        field_id="management.remote.source.restriction.configured",
+        matcher=NodeMatcher(
+            command="access-class", arguments_prefix=(),
+            parent_command="line", parent_arguments_prefix=("vty",),
+        ),
+        extractor="cisco_access_class", scope_resolver="vty_range",
+        declared_value_types=frozenset({TypedValueType.BOOLEAN}),
+    ),
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b502"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf502"),
+        field_id="logging.enabled",
+        matcher=NodeMatcher(command="logging", arguments_prefix=("on",)),
+        extractor="presence_enabled", scope_resolver="device",
+        declared_value_types=frozenset({TypedValueType.BOOLEAN}),
+    ),
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b503"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf503"),
+        field_id="time.ntp.authentication.enabled",
+        matcher=NodeMatcher(command="ntp", arguments_prefix=("authenticate",)),
+        extractor="presence_enabled", scope_resolver="device",
+        declared_value_types=frozenset({TypedValueType.BOOLEAN}),
+    ),
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b504"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf504"),
+        field_id="time.ntp.authentication.key_id",
+        matcher=NodeMatcher(command="ntp", arguments_prefix=("authentication-key",)),
+        extractor="ntp_key_id", scope_resolver="device",
+        declared_value_types=frozenset({TypedValueType.INTEGER}),
+        negation_behavior=NegationBehavior.REMOVE_VALUE,
+        removal_mapping_version_id=UUID("9d541282-0e9a-5180-a80b-3c2041c7b504"),
+    ),
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b505"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf505"),
+        field_id="time.ntp.authentication.trusted_key_id",
+        matcher=NodeMatcher(command="ntp", arguments_prefix=("trusted-key",)),
+        extractor="ntp_key_id", scope_resolver="device",
+        declared_value_types=frozenset({TypedValueType.INTEGER}),
+        negation_behavior=NegationBehavior.REMOVE_VALUE,
+        removal_mapping_version_id=UUID("9d541282-0e9a-5180-a80b-3c2041c7b505"),
+    ),
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b506"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf506"),
+        field_id="time.ntp.configured",
+        matcher=NodeMatcher(command="ntp", arguments_prefix=("server",)),
+        extractor="ntp_configured", scope_resolver="device",
+        declared_value_types=frozenset({TypedValueType.BOOLEAN}),
     ),
 )

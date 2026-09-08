@@ -143,6 +143,15 @@ def _validate_matcher(matcher: NodeMatcher) -> None:
         raise KnowledgePackValidationError("Mapping parent matcher is malformed")
     if matcher.parent_command is None and matcher.parent_arguments_prefix:
         raise KnowledgePackValidationError("Mapping parent matcher is malformed")
-    tokens = matcher.arguments_prefix + matcher.parent_arguments_prefix
+    if matcher.ancestor_command is not None and not COMMAND_PATTERN.fullmatch(
+        matcher.ancestor_command
+    ):
+        raise KnowledgePackValidationError("Mapping ancestor matcher is malformed")
+    if matcher.ancestor_command is None and matcher.ancestor_arguments_prefix:
+        raise KnowledgePackValidationError("Mapping ancestor matcher is malformed")
+    tokens = (
+        matcher.arguments_prefix + matcher.parent_arguments_prefix
+        + matcher.ancestor_arguments_prefix
+    )
     if any(not MAPPING_TOKEN_PATTERN.fullmatch(token) for token in tokens):
         raise KnowledgePackValidationError("Mapping token matcher is malformed")

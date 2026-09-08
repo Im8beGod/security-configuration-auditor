@@ -122,7 +122,18 @@ def _resolve_scalar_field(audit_id: UUID, device_id: UUID, field_id: str, facts:
     if not facts:
         return []
     if facts[0].scope.type != "vty_range":
-        return [_resolve_scalar_scope(audit_id, device_id, field_id, facts[0].scope, facts)]
+        # Interface and administrator facts are deliberately independent.  A
+        # value from one native management scope must never become device-wide
+        # truth merely because it shares a canonical field with another scope.
+        grouped = groupby(
+            sorted(facts, key=lambda item: (item.scope.type, item.scope.key, str(item.fact.fact_id))),
+            key=lambda item: (item.scope.type, item.scope.key),
+        )
+        return [
+            _resolve_scalar_scope(audit_id, device_id, field_id, items[0].scope, items)
+            for _, scoped in grouped
+            for items in (tuple(scoped),)
+        ]
     result = []
     for scope, applicable in _vty_partitions(facts):
         result.append(_resolve_scalar_scope(audit_id, device_id, field_id, scope, applicable))

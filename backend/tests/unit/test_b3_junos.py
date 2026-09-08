@@ -39,7 +39,23 @@ def test_junos_profile_is_conservative_and_xml_pack_maps_reviewed_fields():
     assert [(item.field_id, item.value.value) for item in result.facts] == [
         ("management.remote.ssh.enabled", True), ("logging.remote.destination", "host111"),
         ("time.ntp.server", "66.129.233.81"), ("time.ntp.server", "192.0.2.10"),
+        ("time.ntp.configured", True), ("time.ntp.configured", True),
     ]
+
+
+def test_b5_junos_timeout_is_normalized_and_routing_instance_ntp_is_not_flattened():
+    ir = _ir("""<configuration><system><login><idle-timeout>15</idle-timeout></login><ntp>
+    <server><name>192.0.2.10</name></server>
+    <server><name>198.51.100.10</name><routing-instance>blue</routing-instance></server>
+    </ntp></system></configuration>""")
+    result = interpret_xml_structural_ir(
+        ir, InterpretationContext(UUID(int=5), UUID(int=6), UUID(int=3)),
+        profile_version_id="juniper.junos.18@1.0.0", knowledge_pack=JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+    )
+    timeout = next(item for item in result.facts if item.field_id == "management.session.idle_timeout")
+    assert (timeout.value.value, timeout.value.unit) == (900, "seconds")
+    assert [item.value.value for item in result.facts if item.field_id == "time.ntp.server"] == ["192.0.2.10"]
+    assert "xml_scope_unsupported" in {item.code for item in result.diagnostics}
 
 
 def test_manifest_selectors_resolve_junos_xml_identity_with_path_provenance():

@@ -8,11 +8,30 @@ from app.db.models import ArtifactEvidenceType, DeviceClass
 
 @dataclass(frozen=True)
 class VersionConstraint:
-    supported_major_versions: frozenset[int]
+    supported_major_versions: frozenset[int] = frozenset()
+    minimum_version: tuple[int, ...] | None = None
+    maximum_version: tuple[int, ...] | None = None
+    excluded_versions: frozenset[str] = frozenset()
 
     def accepts(self, version: str) -> bool:
-        match = re.match(r"^(\d+)(?:\.|$)", version)
-        return bool(match and int(match.group(1)) in self.supported_major_versions)
+        parsed = self.parse(version)
+        if parsed is None:
+            return False
+        normalized = ".".join(str(item) for item in parsed)
+        if normalized in self.excluded_versions or version in self.excluded_versions:
+            return False
+        if self.supported_major_versions and parsed[0] not in self.supported_major_versions:
+            return False
+        lower = self.minimum_version and parsed[:len(self.minimum_version)] < self.minimum_version
+        upper = self.maximum_version and parsed[:len(self.maximum_version)] > self.maximum_version
+        return not (lower or upper)
+
+    @staticmethod
+    def parse(version: str | None) -> tuple[int, ...] | None:
+        if not version or not re.fullmatch(r"\d+(?:\.\d+)*[A-Za-z0-9-]*", version):
+            return None
+        numbers = re.match(r"(\d+(?:\.\d+)*)", version)
+        return tuple(int(item) for item in numbers.group(1).split(".")) if numbers else None
 
 
 @dataclass(frozen=True)
@@ -30,6 +49,20 @@ class ProfileManifest:
     knowledge_pack_name: str | None
     capabilities: frozenset[str]
     coverage_manifest: Mapping[str, object]
+    manifest_schema_version: str = "1.0.0"
+    exclusions: frozenset[str] = frozenset()
+    detection_tokens: tuple[str, ...] = ()
+
+    def applicability(self, version: str | None) -> str:
+        if version is None:
+            return "version_unknown"
+        return "compatible" if self.version_constraint.accepts(version) and version not in self.exclusions else "incompatible"
+
+
+def compatible_manifests(vendor: str, os_name: str, version: str | None) -> tuple[ProfileManifest, ...]:
+    candidates = tuple(item for item in PROFILE_REGISTRY.values()
+                       if item.vendor == vendor and item.os == os_name and item.applicability(version) == "compatible")
+    return tuple(sorted(candidates, key=lambda item: (item.profile_id, item.profile_version)))
 
 
 CISCO_IOS_XE_17 = ProfileManifest(

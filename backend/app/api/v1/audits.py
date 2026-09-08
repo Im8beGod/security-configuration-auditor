@@ -19,7 +19,7 @@ from app.audit.service import (
     start_audit,
 )
 from app.assessment_packs.service import compatible_packs
-from app.db.models import AuditAssessment, AssessmentPackVersion
+from app.db.models import AuditAssessment, AssessmentPackVersion, ProfileResolutionDecision
 from app.reevaluation.service import eligibility as reevaluation_eligibility, history as reevaluation_history, start as start_reevaluation
 from app.auth.dependencies import get_current_user, require_roles
 from app.db.models import Audit, User, UserRole
@@ -131,6 +131,29 @@ def get_audit_endpoint(
         return _response(db, get_audit(db, user, audit_id))
     except AuditNotFoundError as error:
         raise _translate(error) from None
+
+
+@router.get("/{audit_id}/profile-resolution", response_model=dict[str, object])
+def profile_resolution_endpoint(
+    audit_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, object]:
+    audit = get_audit(db, user, audit_id)
+    decision = db.scalar(select(ProfileResolutionDecision).where(
+        ProfileResolutionDecision.audit_id == audit.audit_id,
+        ProfileResolutionDecision.organization_id == user.organization_id,
+    ).order_by(ProfileResolutionDecision.created_at.desc()))
+    if decision is None:
+        return dict(audit.profile_resolution or {})
+    return {
+        "resolution_status": decision.resolution_status,
+        "selected_profile_id": decision.selected_profile_id,
+        "selected_profile_version_id": decision.selected_profile_version_id,
+        "applicability_status": decision.applicability_status,
+        "identity_provenance": decision.identity_provenance,
+        "evidence_summary": decision.evidence_summary,
+    }
 
 
 @router.post("/{audit_id}/run", response_model=AuditResponse)

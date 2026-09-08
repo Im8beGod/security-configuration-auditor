@@ -172,7 +172,7 @@ class AuditPipelineCoordinator:
             audit = db.scalar(select(Audit).where(
                 Audit.audit_id == audit_id, Audit.organization_id == organization_id
             ).with_for_update())
-            if audit is None or audit.status is not AuditStatus.PROCESSING:
+            if audit is None or audit.status != AuditStatus.PROCESSING:
                 raise AuditConflictError("audit_not_processing", "Audit is not processing")
             existing_packs = audit.version_refs.get("rule_pack_versions")
             expected_rule_pack = RULE_PACK_BY_PROFILE.get(profile_version_id)

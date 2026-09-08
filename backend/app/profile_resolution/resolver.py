@@ -14,7 +14,7 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7
+from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, compatible_manifests
 
 
 MAX_LINE_CHARACTERS = 4096
@@ -293,13 +293,20 @@ def _resolve_candidates(
                     status=ResolutionStatus.PARTIALLY_RESOLVED,
                     reasons=("IOS XE version is required for profile applicability",),
                 )
-            if CISCO_IOS_XE_17.version_constraint.accepts(version):
+            candidates = compatible_manifests(vendor, os_name, version)
+            if len(candidates) > 1:
+                return _result(vendor=vendor, product_family=product_family, os_name=os_name, os_version=version,
+                               model=model, serial_number=serial_number, device_class=device_class, signals=signals,
+                               confidence=ResolutionConfidence.UNRESOLVED, status=ResolutionStatus.AMBIGUOUS,
+                               reasons=("Multiple compatible profile manifests were detected",))
+            if candidates:
+                selected = candidates[0]
                 return _result(
                     vendor=vendor, product_family=product_family, os_name=os_name,
                     os_version=version, model=model, serial_number=serial_number,
                     device_class=device_class,
-                    selected_profile_id=CISCO_IOS_XE_17.profile_id,
-                    selected_profile_version_id=CISCO_IOS_XE_17.profile_version_id,
+                    selected_profile_id=selected.profile_id,
+                    selected_profile_version_id=selected.profile_version_id,
                     signals=signals, confidence=explicit_confidence,
                     status=ResolutionStatus.RESOLVED,
                 )
@@ -320,12 +327,19 @@ def _resolve_candidates(
                     status=ResolutionStatus.PARTIALLY_RESOLVED,
                     reasons=("FortiOS version is required for profile applicability",),
                 )
-            if FORTIOS_7.version_constraint.accepts(version):
+            candidates = compatible_manifests(vendor, os_name, version)
+            if len(candidates) > 1:
+                return _result(vendor=vendor, product_family="FortiGate", os_name=os_name, os_version=version,
+                               signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
+                               status=ResolutionStatus.AMBIGUOUS,
+                               reasons=("Multiple compatible profile manifests were detected",))
+            if candidates:
+                selected = candidates[0]
                 return _result(
                     vendor=vendor, product_family="FortiGate", os_name=os_name,
                     os_version=version, device_class=DeviceClass.FIREWALL,
-                    selected_profile_id=FORTIOS_7.profile_id,
-                    selected_profile_version_id=FORTIOS_7.profile_version_id,
+                    selected_profile_id=selected.profile_id,
+                    selected_profile_version_id=selected.profile_version_id,
                     signals=signals, confidence=explicit_confidence,
                     status=ResolutionStatus.RESOLVED,
                 )
@@ -452,6 +466,7 @@ def _signal(
         signal_id=signal_id,
         strength=strength,
         extracted_fields=extracted_fields,
+        source_label=document.original_filename,
     )
 
 

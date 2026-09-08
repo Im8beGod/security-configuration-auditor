@@ -81,3 +81,9 @@ def parse_configuration_text(
         source=source,
         input_truncated=input_truncated,
     ))
+
+
+def parse_xml_text(content: str, *, source: ArtifactProvenance, input_truncated: bool = False):
+    return parse_configuration_text(
+        content, source=source, reader_id="xml_tree.v1", input_truncated=input_truncated
+    )

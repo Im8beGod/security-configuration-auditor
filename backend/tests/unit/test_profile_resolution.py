@@ -314,6 +314,7 @@ def test_persisted_shape_is_canonical_and_does_not_include_raw_or_diagnostics():
     assert set(persisted) == {
         "profile_id", "profile_version_id", "vendor", "product_family", "os",
         "os_version", "model", "serial_number", "confidence", "resolution_status",
+        "identity_provenance", "conflicts",
     }
     assert "Cisco IOS XE Software" not in str(persisted)
     assert "supporting_signals" not in persisted

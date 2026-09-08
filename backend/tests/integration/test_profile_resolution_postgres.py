@@ -55,7 +55,7 @@ def test_profile_resolution_persists_atomically_with_tenant_and_snapshot_boundar
 
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0013"
 
         suffix = uuid4().hex
         first_org, first_user = bootstrap_admin(
@@ -255,7 +255,10 @@ def test_profile_resolution_persists_atomically_with_tenant_and_snapshot_boundar
 
         with factory() as db:
             persisted = db.get(Audit, audit_id)
-            assert persisted.profile_resolution == result.to_persisted()
+            assert {
+                key: value for key, value in persisted.profile_resolution.items()
+                if key != "structural_preview"
+            } == result.to_persisted()
             assert persisted.status == AuditStatus.QUEUED
             assert persisted.processing_stage is None
             assert persisted.started_at is None and persisted.completed_at is None

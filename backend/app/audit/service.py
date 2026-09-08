@@ -13,11 +13,14 @@ from app.audit.schemas import AuditCreate, BatchAuditCreate
 from app.db.models import (
     Artifact, Audit, AuditReevaluationReason, AuditStatus, Device, Job,
     Snapshot, SnapshotStatus, User,
+    ProfileResolutionDecision,
 )
 from app.jobs.enums import JobType
 from app.jobs.errors import JobError
 from app.jobs.service import enqueue_job
 from app.ingestion.storage import ArtifactStorage
+from app.parsing.models import ArtifactProvenance
+from app.parsing.service import parse_xml_text
 from app.profile_resolution import (
     ProfileResolutionResult,
     aggregate_snapshot_evidence,
@@ -238,6 +241,23 @@ def resolve_audit_profile(
         artifacts=artifacts,
     )
     result = resolve_profile(evidence)
+    structural_preview: list[dict[str, object]] = []
+    for document in evidence.documents:
+        if document.evidence_type.value != "structured_export":
+            continue
+        try:
+            ir = parse_xml_text(document.text, source=ArtifactProvenance(
+                artifact_id=document.artifact_id, organization_id=document.organization_id,
+                snapshot_id=document.snapshot_id, source_label=document.original_filename,
+                sha256=document.sha256, source_metadata=document.source_metadata,
+            ))
+        except ValueError as error:
+            structural_preview.append({"artifact_id": str(document.artifact_id), "error": str(error)})
+            continue
+        structural_preview.extend({
+            "artifact_id": str(node.source.artifact_id), "path": list(node.path),
+            "tag": node.tag, "attributes": dict(node.attributes), "text": node.text,
+        } for node in ir.nodes[:100])
     try:
         audit = db.scalar(select(Audit).where(
             Audit.audit_id == audit_id,
@@ -278,7 +298,26 @@ def resolve_audit_profile(
                 "audit_profile_version_conflict",
                 "Audit device-profile version is already pinned differently",
             )
-        audit.profile_resolution = result.to_persisted()
+        persisted_resolution = result.to_persisted()
+        persisted_resolution["structural_preview"] = structural_preview
+        audit.profile_resolution = persisted_resolution
+        db.add(ProfileResolutionDecision(
+            organization_id=organization_id,
+            snapshot_id=snapshot_id,
+            audit_id=audit_id,
+            resolution_status=result.resolution_status.value,
+            selected_profile_id=result.selected_profile_id,
+            selected_profile_version_id=result.selected_profile_version_id,
+            applicability_status=("compatible" if result.selected_profile_version_id else
+                                   "version_unknown" if result.os and not result.os_version else
+                                   "incompatible" if result.os_version else "unsupported"),
+            identity_provenance=result.identity_provenance,
+            evidence_summary={
+                "artifact_ids": [str(item.artifact_id) for item in evidence.documents],
+                "issues": [{"artifact_id": str(item.artifact_id), "code": item.code} for item in evidence.issues],
+                "structural_preview": structural_preview,
+            },
+        ))
         db.commit()
     except SQLAlchemyError:
         db.rollback()

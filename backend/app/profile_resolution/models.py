@@ -28,6 +28,9 @@ class ResolutionStatus(str, Enum):
     UNSUPPORTED = "unsupported"
     CONFLICT = "conflict"
     UNRESOLVED = "unresolved"
+    AMBIGUOUS = "ambiguous"
+    INCOMPATIBLE = "incompatible"
+    VERSION_UNKNOWN = "version_unknown"
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,7 @@ class EvidenceSignal:
     signal_id: str
     strength: SignalStrength
     extracted_fields: tuple[str, ...] = ()
+    source_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,20 @@ class ProfileResolutionResult:
     unresolved_reasons: tuple[str, ...]
     conflicts: tuple[ResolutionConflict, ...]
 
+    @property
+    def identity_provenance(self) -> dict[str, list[dict[str, Any]]]:
+        provenance: dict[str, list[dict[str, Any]]] = {}
+        for signal in self.supporting_signals:
+            for field in signal.extracted_fields:
+                provenance.setdefault(field, []).append({
+                    "artifact_id": str(signal.artifact_id),
+                    "source": signal.source_label,
+                    "line": signal.line_number,
+                    "basis": signal.signal_id,
+                    "confidence": signal.strength.value,
+                })
+        return provenance
+
     def to_persisted(self) -> dict[str, Any]:
         """Return exactly the frozen Audit.profile_resolution contract."""
         return {
@@ -77,4 +95,9 @@ class ProfileResolutionResult:
             "serial_number": self.serial_number,
             "confidence": self.confidence.value,
             "resolution_status": self.resolution_status.value,
+            "identity_provenance": self.identity_provenance,
+            "conflicts": [
+                {"code": item.code, "artifact_ids": [str(value) for value in item.artifact_ids]}
+                for item in self.conflicts
+            ],
         }

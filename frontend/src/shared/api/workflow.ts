@@ -1,4 +1,4 @@
-import type { Artifact, Audit, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
+import type { Artifact, Audit, BatchAuditResponse, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
 import { apiRequest } from './client'
 
 export const workflowKeys = {
@@ -80,6 +80,13 @@ export async function createAudit(snapshotId: string): Promise<Audit> {
 
 export async function runAudit(id: string): Promise<Audit> {
   return await apiRequest(`/audits/${id}/run`, { method: 'POST' }) as Audit
+}
+
+export async function createBatchAudits(items: Array<{ device_id: string; snapshot_id: string }>): Promise<BatchAuditResponse> {
+  return await apiRequest('/audits/batch', {
+    method: 'POST',
+    body: json({ items: items.map((item) => ({ ...item, selected_frameworks: [] })) }),
+  }) as BatchAuditResponse
 }
 
 export async function getJob(id: string): Promise<JobSummary> {

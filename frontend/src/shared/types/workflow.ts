@@ -137,6 +137,24 @@ export interface Audit {
   job: JobSummary | null
 }
 
+export type BatchAuditItemStatus = 'accepted' | 'rejected'
+
+export interface BatchAuditItemResult {
+  status: BatchAuditItemStatus
+  device_id: string
+  snapshot_id: string
+  audit_id: string | null
+  job_id: string | null
+  error_code: string | null
+  error_message: string | null
+}
+
+export interface BatchAuditResponse {
+  accepted: number
+  rejected: number
+  results: BatchAuditItemResult[]
+}
+
 export interface ReevaluationEligibility {
   eligible: boolean
   reason: string | null

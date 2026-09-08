@@ -37,7 +37,7 @@ def test_batch_submission_persists_independent_cisco_and_fortios_audits():
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0014"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0015"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(

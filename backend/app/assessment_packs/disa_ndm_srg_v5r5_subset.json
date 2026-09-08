@@ -1,0 +1,22 @@
+{
+  "framework": "DISA Network Device Management SRG",
+  "benchmark_title": "Network Device Management Security Requirements Guide",
+  "benchmark_id": "Network_Device_Management_SRG",
+  "version": "5",
+  "release": "5",
+  "release_date": "2026-07-10",
+  "retrieved_at": "2026-09-09",
+  "source_url": "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_NDM_V5R5_SRG.zip",
+  "artifact_filename": "U_NDM_V5R5_SRG.zip",
+  "xccdf_filename": "U_NDM_SRG_V5R5_Manual-xccdf.xml",
+  "source_sha256": "d6f4415ed5cb4d4c5e589b3e8060203f43742b490aa30be479c774c6ef292a92",
+  "rules": [
+    {"v_number": "V-202039", "rule_id": "SV-202039r960927_rule", "srg_id": "SRG-APP-000116-NDM-000234", "severity": "medium", "cat": "CAT II"},
+    {"v_number": "V-202074", "rule_id": "SV-202074r961068_rule", "srg_id": "SRG-APP-000190-NDM-000267", "severity": "high", "cat": "CAT I"},
+    {"v_number": "V-202112", "rule_id": "SV-202112r961506_rule", "srg_id": "SRG-APP-000395-NDM-000347", "severity": "medium", "cat": "CAT II"},
+    {"v_number": "V-202118", "rule_id": "SV-202118r961557_rule", "srg_id": "SRG-APP-000412-NDM-000331", "severity": "high", "cat": "CAT I"},
+    {"v_number": "V-213467", "rule_id": "SV-213467r1137890_rule", "srg_id": "SRG-APP-000516-NDM-000350", "severity": "high", "cat": "CAT I"},
+    {"v_number": "V-264307", "rule_id": "SV-264307r984162_rule", "srg_id": "SRG-APP-000920-NDM-000320", "severity": "medium", "cat": "CAT II"},
+    {"v_number": "V-264308", "rule_id": "SV-264308r984165_rule", "srg_id": "SRG-APP-000925-NDM-000330", "severity": "medium", "cat": "CAT II"}
+  ]
+}

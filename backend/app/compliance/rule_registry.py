@@ -65,6 +65,7 @@ RULES = (
     _rule("logging.remote.destination.approved", "Remote logging destinations approved by organization policy", "logging", FindingSeverity.MEDIUM, "logging.remote.destination", "all_members_in_parameter_set", parameter="approved_logging_destinations"),
     _rule("time.ntp.server.configured", "NTP server configured", "time", FindingSeverity.MEDIUM, "time.ntp.server", "non_empty", framework_references=(_nist("AU-8"),)),
     _rule("time.ntp.configured", "NTP configuration present", "time", FindingSeverity.MEDIUM, "time.ntp.configured", "equals", True, framework_references=(_nist("AU-8"),)),
+    _rule("time.ntp.authentication.enabled", "Cryptographic NTP source authentication enabled", "time", FindingSeverity.MEDIUM, "time.ntp.authentication.enabled", "equals", True),
     _rule("time.ntp.server.approved", "NTP servers approved by organization policy", "time", FindingSeverity.MEDIUM, "time.ntp.server", "all_members_in_parameter_set", parameter="approved_ntp_servers"),
 )
 

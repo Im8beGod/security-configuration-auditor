@@ -44,6 +44,8 @@ def rule(rule_id):
     ("time.ntp.server.configured", _value("list", [{"value": "192.0.2.1"}]), FindingVerdict.PASS),
     ("time.ntp.configured", _value("boolean", True), FindingVerdict.PASS),
     ("time.ntp.configured", _value("boolean", False), FindingVerdict.FAIL),
+    ("time.ntp.authentication.enabled", _value("boolean", True), FindingVerdict.PASS),
+    ("time.ntp.authentication.enabled", _value("boolean", False), FindingVerdict.FAIL),
     ("logging.remote.destination.approved", _value("list", [{"value": "192.0.2.1"}]), FindingVerdict.PASS),
     ("time.ntp.server.approved", _value("list", [{"value": "192.0.2.2"}]), FindingVerdict.FAIL),
 ])
@@ -53,7 +55,7 @@ def test_bounded_rules_produce_expected_verdicts(rule_id, value, expected):
 
 
 def test_registry_is_versioned_immutable_and_fails_closed():
-    assert len(RULE_PACK.rules) == 10
+    assert len(RULE_PACK.rules) == 11
     assert RuleRegistry().get(RULE_PACK.rule_pack_version_id) is RULE_PACK
     with pytest.raises(RuleRegistryError, match="unavailable"):
         RuleRegistry().get(uuid4())

@@ -59,7 +59,7 @@ def test_synthetic_packs_pin_and_change_results_without_changing_evidence():
     engine = create_database_engine(settings)
     factory = create_session_factory(engine)
     with factory.begin() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0013"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0014"
         organization = Organization(name="B1 Organization", slug=f"b1-{uuid4().hex[:12]}")
         other = Organization(name="B1 Other", slug=f"b1-other-{uuid4().hex[:12]}")
         db.add_all([organization, other])

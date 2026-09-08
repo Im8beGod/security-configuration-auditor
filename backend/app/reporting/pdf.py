@@ -187,6 +187,19 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
     if not document.get("findings"):
         story.append(Paragraph("No findings were provided for this audit.", body))
 
+    assessment_results = document.get("assessment_results") or []
+    if assessment_results:
+        story.append(Paragraph("Assessment pack results", styles["Heading1"]))
+        for item in assessment_results:
+            story.append(labeled_table([
+                ("Obligation", _escape(str(item.get("obligation_key") or MISSING))),
+                ("Control", _escape(" ".join(str(value) for value in (item.get("control_id"), item.get("control_title")) if value) or MISSING)),
+                ("Assessment mode", scalar(item.get("assessment_method"))),
+                ("Implementation", scalar(item.get("implementation_status"))),
+                ("Result", scalar(item.get("verdict"), "Manual / unimplemented")),
+                ("State / evidence", format_readable((item.get("details") or {}).get("effective_state") or item.get("details"))),
+            ]))
+
     SimpleDocTemplate(
         stream,
         pagesize=A4,

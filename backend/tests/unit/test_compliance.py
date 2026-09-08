@@ -11,7 +11,7 @@ from app.compliance.models import (
     deterministic_finding_id, deterministic_policy_version_id,
 )
 from app.compliance.policy import OrganizationPolicyRegistry, PolicyRegistryError
-from app.compliance.rule_registry import FORTIOS_RULE_PACK, RULE_PACK, RuleRegistry, RuleRegistryError
+from app.compliance.rule_registry import FORTIOS_RULE_PACK, JUNOS_RULE_PACK, RULE_PACK, RuleRegistry, RuleRegistryError
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import AuditStatus
 from app.effective_state import UnresolvedReason
@@ -36,10 +36,14 @@ def rule(rule_id):
     ("management.ssh.version_2", _value("integer", 1), FindingVerdict.FAIL),
     ("management.idle_timeout.maximum", _value("duration", 300), FindingVerdict.PASS),
     ("management.idle_timeout.maximum", _value("duration", 301), FindingVerdict.FAIL),
+    ("logging.enabled", _value("boolean", True), FindingVerdict.PASS),
+    ("logging.enabled", _value("boolean", False), FindingVerdict.FAIL),
     ("logging.remote.destination.configured", _value("list", []), FindingVerdict.FAIL),
     ("logging.remote.destination.configured", _value("list", [{"value": "192.0.2.1"}]), FindingVerdict.PASS),
     ("time.ntp.server.configured", _value("list", []), FindingVerdict.FAIL),
     ("time.ntp.server.configured", _value("list", [{"value": "192.0.2.1"}]), FindingVerdict.PASS),
+    ("time.ntp.configured", _value("boolean", True), FindingVerdict.PASS),
+    ("time.ntp.configured", _value("boolean", False), FindingVerdict.FAIL),
     ("logging.remote.destination.approved", _value("list", [{"value": "192.0.2.1"}]), FindingVerdict.PASS),
     ("time.ntp.server.approved", _value("list", [{"value": "192.0.2.2"}]), FindingVerdict.FAIL),
 ])
@@ -49,7 +53,7 @@ def test_bounded_rules_produce_expected_verdicts(rule_id, value, expected):
 
 
 def test_registry_is_versioned_immutable_and_fails_closed():
-    assert len(RULE_PACK.rules) == 8
+    assert len(RULE_PACK.rules) == 10
     assert RuleRegistry().get(RULE_PACK.rule_pack_version_id) is RULE_PACK
     with pytest.raises(RuleRegistryError, match="unavailable"):
         RuleRegistry().get(uuid4())
@@ -70,10 +74,13 @@ def test_selected_nist_references_are_verified_and_not_verdict_logic():
         "management.ssh.enabled": ("AC-17", "Remote Access"),
         "management.ssh.version_2": ("AC-17", "Remote Access"),
         "management.idle_timeout.maximum": ("AC-11", "Session Lock"),
-        "logging.remote.destination.configured": ("AU-12", "Audit Generation"),
+        "logging.enabled": ("AU-12", "Audit Record Generation"),
+        "logging.remote.destination.configured": ("AU-12", "Audit Record Generation"),
         "time.ntp.server.configured": ("AU-8", "Time Stamps"),
+        "time.ntp.configured": ("AU-8", "Time Stamps"),
     }
-    for pack in (RULE_PACK, FORTIOS_RULE_PACK):
+    expected["management.idle_timeout.maximum"] = ("AC-11", "Device Lock")
+    for pack in (RULE_PACK, FORTIOS_RULE_PACK, JUNOS_RULE_PACK):
         for rule in pack.rules:
             references = rule.framework_references
             if rule.rule_id in expected:

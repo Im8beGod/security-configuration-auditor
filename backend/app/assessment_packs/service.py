@@ -161,17 +161,32 @@ def persist_assessment_results(
             if not field_states:
                 verdict = FindingVerdict.UNKNOWN.value
                 details["unknown_reason"] = UnresolvedReason.MISSING_EVIDENCE.value
+            elif len(field_states) != 1:
+                # A pack obligation is never allowed to turn several native scopes
+                # into one device-wide claim by selecting an arbitrary state.
+                verdict = FindingVerdict.UNKNOWN.value
+                details["unknown_reason"] = UnresolvedReason.AMBIGUOUS_SCOPE.value
             else:
                 state = field_states[0]
+                details["effective_state"] = {
+                    "field_id": state.field_id,
+                    "scope": state.scope,
+                    "value": state.effective_value,
+                    "resolution_status": state.resolution_status.value,
+                    "source_fact_ids": [str(item) for item in state.source_fact_ids],
+                    "resolution_trace": state.resolution_trace,
+                }
                 if state.resolution_status is not ResolutionStatus.RESOLVED:
                     verdict = FindingVerdict.UNKNOWN.value
-                    details["unknown_reason"] = (state.unresolved_reason or UnresolvedReason.CONFLICTING_EVIDENCE).value
+                    reason = state.unresolved_reason or UnresolvedReason.CONFLICTING_EVIDENCE
+                    details["unknown_reason"] = reason.value if isinstance(reason, UnresolvedReason) else str(reason)
                 else:
                     condition = dict(rule.condition)
                     if "expected" in obligation.policy_parameters:
                         condition["expected"] = obligation.policy_parameters["expected"]
                     try:
-                        verdict = evaluate_condition(replace(rule, condition=condition), state.effective_value).value
+                        parameter = obligation.policy_parameters.get(condition.get("parameter")) if condition.get("parameter") else None
+                        verdict = evaluate_condition(replace(rule, condition=condition), state.effective_value, parameter).value
                     except EvaluationError:
                         verdict = FindingVerdict.UNKNOWN.value
                         details["unknown_reason"] = "assessment_evaluation_error"

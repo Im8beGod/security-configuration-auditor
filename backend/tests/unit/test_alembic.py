@@ -23,6 +23,7 @@ STEP_10A_REVISION = "20260907_0010"
 STEP_11_1_REVISION = "20260908_0011"
 ASSESSMENT_PACK_REVISION = "20260908_0012"
 PROFILE_MANIFEST_REVISION = "20260908_0013"
+NIST_PACK_REVISION = "20260909_0014"
 
 
 def get_script_directory() -> ScriptDirectory:
@@ -39,11 +40,11 @@ def test_migration_history_extends_parentless_baseline() -> None:
     script = get_script_directory()
     revisions = list(script.walk_revisions())
 
-    assert script.get_heads() == [PROFILE_MANIFEST_REVISION]
-    assert len(revisions) == 13
-    expected = [PROFILE_MANIFEST_REVISION, ASSESSMENT_PACK_REVISION, STEP_11_1_REVISION, STEP_10A_REVISION, STEP_9_2_REVISION, STEP_9_1_REVISION, STEP_7_1_REVISION, STEP_6A_REVISION, STEP_5C_REVISION, STEP_3_9_REVISION, STEP_3_6_REVISION, CURRENT_REVISION, BASELINE_REVISION]
+    assert script.get_heads() == [NIST_PACK_REVISION]
+    assert len(revisions) == 14
+    expected = [NIST_PACK_REVISION, PROFILE_MANIFEST_REVISION, ASSESSMENT_PACK_REVISION, STEP_11_1_REVISION, STEP_10A_REVISION, STEP_9_2_REVISION, STEP_9_1_REVISION, STEP_7_1_REVISION, STEP_6A_REVISION, STEP_5C_REVISION, STEP_3_9_REVISION, STEP_3_6_REVISION, CURRENT_REVISION, BASELINE_REVISION]
     assert [item.revision for item in revisions] == expected
-    assert revisions[0].down_revision == ASSESSMENT_PACK_REVISION
+    assert revisions[0].down_revision == PROFILE_MANIFEST_REVISION
     assert revisions[-1].down_revision is None
 
 

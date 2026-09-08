@@ -2,7 +2,7 @@ import hashlib
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.db.models import Audit, AuditAssessment, AssessmentPackVersion, AuditStatus, Device, Finding, Report, ReportStatus, User
+from app.db.models import AssessmentObligation, AssessmentResult, Audit, AuditAssessment, AssessmentPackVersion, AuditStatus, Device, Finding, Report, ReportStatus, User
 from app.db.models.common import utc_now
 from app.jobs.enums import JobType
 from app.jobs.service import enqueue_job
@@ -19,7 +19,7 @@ def _enum_value(value):
     return value.value if hasattr(value, "value") else value
 
 
-def build_report_document(device: Device, audit: Audit, findings: list[dict], assessment: dict | None = None) -> dict:
+def build_report_document(device: Device, audit: Audit, findings: list[dict], assessment: dict | None = None, assessment_results: list[dict] | None = None) -> dict:
     """Build report data from persisted inventory and the immutable audit profile."""
     profile = audit.profile_resolution or {}
     device_class = profile.get("device_class") or _enum_value(device.device_class)
@@ -49,6 +49,7 @@ def build_report_document(device: Device, audit: Audit, findings: list[dict], as
             "assessment": assessment or {},
         },
         "findings": findings,
+        "assessment_results": assessment_results or [],
     }
 
 def create_report(db: Session, user: User, audit_id: UUID):
@@ -84,6 +85,7 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
         remediation = get_remediation(db, user, item.finding_id) if user else {"status":"unavailable","reason":"generator_identity_unavailable"}
         records.append({key: getattr(item,key).value if hasattr(getattr(item,key),"value") else getattr(item,key) for key in ("title","verdict","severity","expected_state","observed_state","explanation","affected_scope","framework_references","evidence_refs")} | {"remediation": remediation})
     assessment = {}
+    assessment_results = []
     pinned = db.get(AuditAssessment, audit.audit_id)
     if pinned is not None:
         pack = db.get(AssessmentPackVersion, pinned.assessment_pack_version_id)
@@ -94,7 +96,21 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
                 "source_version_label": pack.source_version_label,
                 "content_digest": pack.content_digest,
             }
-    pdf = build_device_compliance_pdf(build_report_document(device, audit, records, assessment))
+            rows = db.execute(select(AssessmentResult, AssessmentObligation).join(
+                AssessmentObligation,
+                AssessmentResult.assessment_obligation_id == AssessmentObligation.assessment_obligation_id,
+            ).where(AssessmentResult.audit_id == audit.audit_id).order_by(AssessmentObligation.obligation_key)).all()
+            assessment_results = [{
+                "obligation_key": obligation.obligation_key,
+                "title": obligation.title,
+                "control_id": (obligation.source_reference or {}).get("control_id"),
+                "control_title": (obligation.source_reference or {}).get("control_title"),
+                "assessment_method": result.assessment_method,
+                "implementation_status": result.implementation_status,
+                "verdict": result.verdict,
+                "details": result.result_details,
+            } for result, obligation in rows]
+    pdf = build_device_compliance_pdf(build_report_document(device, audit, records, assessment, assessment_results))
     reference = storage.write(pdf, organization_id=report.organization_id, report_id=report.report_id)
     report.storage_reference=reference; report.sha256=hashlib.sha256(pdf).hexdigest(); report.byte_size=len(pdf); report.generated_at=utc_now(); report.status=ReportStatus.READY; db.flush()
     return report

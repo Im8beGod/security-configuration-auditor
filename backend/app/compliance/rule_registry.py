@@ -7,7 +7,7 @@ from uuid import uuid5
 
 from app.compliance.models import RULE_PACK_NAMESPACE, RuleDefinition, RulePack
 from app.compliance.verdicts import FindingSeverity
-from app.profile_resolution import CISCO_IOS_XE_17, FORTIOS_7
+from app.profile_resolution import CISCO_IOS_XE_17, FORTIOS_7, JUNIPER_JUNOS_18
 
 
 class RuleRegistryError(ValueError):
@@ -21,10 +21,10 @@ SUPPORTED_OPERATORS = frozenset({
 NIST_FRAMEWORK = "NIST SP 800-53"
 NIST_REVISION = "Rev. 5"
 VERIFIED_NIST_TITLES = {
-    "AC-11": "Session Lock",
+    "AC-11": "Device Lock",
     "AC-17": "Remote Access",
     "AU-8": "Time Stamps",
-    "AU-12": "Audit Generation",
+    "AU-12": "Audit Record Generation",
 }
 
 
@@ -60,9 +60,11 @@ RULES = (
     _rule("management.ssh.enabled", "SSH management access enabled", "management", FindingSeverity.HIGH, "management.remote.ssh.enabled", "equals", True, framework_references=(_nist("AC-17"),)),
     _rule("management.ssh.version_2", "SSH protocol version 2 required", "management", FindingSeverity.MEDIUM, "management.remote.ssh.version", "equals", 2, framework_references=(_nist("AC-17"),)),
     _rule("management.idle_timeout.maximum", "Administrative idle timeout within organization maximum", "management", FindingSeverity.MEDIUM, "management.session.idle_timeout", "less_than_or_equal", parameter="maximum_admin_idle_timeout_seconds", framework_references=(_nist("AC-11"),)),
+    _rule("logging.enabled", "Configuration logging enabled", "logging", FindingSeverity.MEDIUM, "logging.enabled", "equals", True, framework_references=(_nist("AU-12"),)),
     _rule("logging.remote.destination.configured", "Remote logging destination configured", "logging", FindingSeverity.MEDIUM, "logging.remote.destination", "non_empty", framework_references=(_nist("AU-12"),)),
     _rule("logging.remote.destination.approved", "Remote logging destinations approved by organization policy", "logging", FindingSeverity.MEDIUM, "logging.remote.destination", "all_members_in_parameter_set", parameter="approved_logging_destinations"),
     _rule("time.ntp.server.configured", "NTP server configured", "time", FindingSeverity.MEDIUM, "time.ntp.server", "non_empty", framework_references=(_nist("AU-8"),)),
+    _rule("time.ntp.configured", "NTP configuration present", "time", FindingSeverity.MEDIUM, "time.ntp.configured", "equals", True, framework_references=(_nist("AU-8"),)),
     _rule("time.ntp.server.approved", "NTP servers approved by organization policy", "time", FindingSeverity.MEDIUM, "time.ntp.server", "all_members_in_parameter_set", parameter="approved_ntp_servers"),
 )
 
@@ -77,6 +79,13 @@ FORTIOS_RULE_PACK = RulePack(
     name="fortios_7_technical_baseline", version="1.0.0",
     profile_version_id=FORTIOS_7.profile_version_id,
     rules=tuple(replace(rule, applicability=MappingProxyType({"profile_version_id": FORTIOS_7.profile_version_id})) for rule in RULES),
+)
+
+JUNOS_RULE_PACK = RulePack(
+    rule_pack_version_id=uuid5(RULE_PACK_NAMESPACE, "juniper_junos_18_technical_baseline@1.0.0"),
+    name="juniper_junos_18_technical_baseline", version="1.0.0",
+    profile_version_id=JUNIPER_JUNOS_18.profile_version_id,
+    rules=tuple(replace(rule, applicability=MappingProxyType({"profile_version_id": JUNIPER_JUNOS_18.profile_version_id})) for rule in RULES),
 )
 
 
@@ -131,10 +140,11 @@ def _validate_framework_references(references: tuple[dict[str, object], ...]) ->
                 raise RuleRegistryError("NIST control title is not verified")
 
 
-RULE_REGISTRY = RuleRegistry((RULE_PACK, FORTIOS_RULE_PACK))
+RULE_REGISTRY = RuleRegistry((RULE_PACK, FORTIOS_RULE_PACK, JUNOS_RULE_PACK))
 
 
 RULE_PACK_BY_PROFILE = {
     CISCO_IOS_XE_17.profile_version_id: RULE_PACK,
     FORTIOS_7.profile_version_id: FORTIOS_RULE_PACK,
+    JUNIPER_JUNOS_18.profile_version_id: JUNOS_RULE_PACK,
 }

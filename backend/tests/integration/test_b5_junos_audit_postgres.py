@@ -49,7 +49,7 @@ def test_b5_junos_audit_persists_scoped_semantics_through_normal_workflow(tmp_pa
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0013"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0014"
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(
             factory, "B5 Junos E2E", f"b5-junos-{suffix}",
@@ -75,8 +75,7 @@ def test_b5_junos_audit_persists_scoped_semantics_through_normal_workflow(tmp_pa
             artifact_id = xml_artifact.artifact_id
 
         # Execute the real worker stages through durable fact/state persistence.
-        # Junos deliberately has no framework rule pack, and B5 acceptance ends
-        # before that unrelated later stage.
+        # B5 persistence is stopped before B6's NIST assessment evaluation.
         coordinator = AuditPipelineCoordinator(factory, storage)
         coordinator._begin_processing(audit_id, organization_id)
         with factory() as db:

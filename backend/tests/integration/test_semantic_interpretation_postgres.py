@@ -62,7 +62,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
 
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0013"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0014"
 
         suffix = uuid4().hex
         first_org, first_user = bootstrap_admin(

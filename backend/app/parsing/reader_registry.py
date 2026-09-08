@@ -7,6 +7,7 @@ from app.parsing.readers.indentation_cli import (
     INDENTATION_CLI_READER_ID,
     IndentationCliReader,
 )
+from app.parsing.readers.fortios_cli import FORTIOS_CLI_READER_ID, FortiosCliReader
 
 
 class StructuralReader(Protocol):
@@ -18,4 +19,5 @@ class StructuralReader(Protocol):
 INDENTATION_CLI_READER = IndentationCliReader()
 READER_REGISTRY: Mapping[str, StructuralReader] = MappingProxyType({
     INDENTATION_CLI_READER_ID: INDENTATION_CLI_READER,
+    FORTIOS_CLI_READER_ID: FortiosCliReader(),
 })

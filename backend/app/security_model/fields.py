@@ -23,7 +23,7 @@ _FIELDS = (
     CanonicalField(
         "management.remote.telnet.enabled",
         frozenset({TypedValueType.BOOLEAN}),
-        frozenset({"vty_range"}),
+        frozenset({"vty_range", "device"}),
         "management",
         "Whether Telnet is explicitly allowed by a VTY transport statement.",
         False,
@@ -31,7 +31,7 @@ _FIELDS = (
     CanonicalField(
         "management.remote.ssh.enabled",
         frozenset({TypedValueType.BOOLEAN}),
-        frozenset({"vty_range"}),
+        frozenset({"vty_range", "device"}),
         "management",
         "Whether SSH is explicitly allowed by a VTY transport statement.",
         False,
@@ -47,7 +47,7 @@ _FIELDS = (
     CanonicalField(
         "management.session.idle_timeout",
         frozenset({TypedValueType.DURATION}),
-        frozenset({"vty_range"}),
+        frozenset({"vty_range", "device"}),
         "management",
         "Explicit VTY idle timeout in canonical seconds.",
         False,

@@ -82,9 +82,16 @@ KNOWLEDGE_PACKS_BY_VERSION = {
 }
 
 
+def _fortios_pack():
+    from app.knowledge_packs.fortios_7 import FORTIOS_7_KNOWLEDGE_PACK
+    return FORTIOS_7_KNOWLEDGE_PACK
+
+
 def load_validated_knowledge_pack(profile_version_id: str) -> KnowledgePack:
     profile = PROFILE_REGISTRY.get(profile_version_id)
     pack = KNOWLEDGE_PACKS.get(profile_version_id)
+    if pack is None and profile_version_id == "fortinet.fortios.7@1.0.0":
+        pack = _fortios_pack()
     if (
         profile is None
         or pack is None
@@ -112,6 +119,8 @@ def load_validated_knowledge_pack_by_version(
 ) -> KnowledgePack:
     """Load an immutable historical pack by its exact pinned identity."""
     pack = KNOWLEDGE_PACKS_BY_VERSION.get(knowledge_pack_version_id)
+    if pack is None and knowledge_pack_version_id == UUID("a1b2c3d4-2222-5aaa-8aaa-000000000013"):
+        pack = _fortios_pack()
     if pack is None:
         raise InterpretationValidationError(
             "knowledge_pack_unavailable", "No compatible knowledge pack is available"
@@ -562,9 +571,19 @@ def _matches(mapping: DeclarativeMapping, node: ConfigNode, ir: StructuralIR) ->
         parent = ir.node(node.parent_id)
     except KeyError:
         return False
-    return parent.command == matcher.parent_command and _has_prefix(
+    if parent.command != matcher.parent_command or not _has_prefix(
         parent.arguments, matcher.parent_arguments_prefix
-    )
+    ):
+        return False
+    if matcher.ancestor_command is None:
+        return True
+    ancestor_id = parent.parent_id
+    while ancestor_id is not None:
+        ancestor = ir.node(ancestor_id)
+        if ancestor.command == matcher.ancestor_command:
+            return _has_prefix(ancestor.arguments, matcher.ancestor_arguments_prefix)
+        ancestor_id = ancestor.parent_id
+    return False
 
 
 def _has_prefix(arguments: tuple[str, ...], prefix: tuple[str, ...]) -> bool:

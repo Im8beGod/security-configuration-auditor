@@ -68,12 +68,12 @@ def test_field_registry_rejects_unknown_wrong_type_and_wrong_scope():
             TypedValue(TypedValueType.STRING, "2"),
             ScopeRef("device", "device", {}),
         )
-    with pytest.raises(FieldRegistryValidationError, match="Scope"):
-        validate_field_value_scope(
-            "management.remote.ssh.enabled",
-            TypedValue(TypedValueType.BOOLEAN, True),
-            ScopeRef("device", "device", {}),
-        )
+        with pytest.raises(FieldRegistryValidationError, match="Scope"):
+            validate_field_value_scope(
+                "management.remote.ssh.enabled",
+                TypedValue(TypedValueType.BOOLEAN, True),
+                ScopeRef("interface", "port1", {}),
+            )
     with pytest.raises(FieldRegistryValidationError, match="value"):
         validate_field_value_scope(
             "management.remote.ssh.version",

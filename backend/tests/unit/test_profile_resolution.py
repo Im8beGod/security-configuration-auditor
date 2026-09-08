@@ -11,6 +11,7 @@ from app.db.models import (
 from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.profile_resolution import (
     CISCO_IOS_XE_17,
+    FORTIOS_7,
     MAX_ARTIFACT_INSPECTION_BYTES,
     PROFILE_REGISTRY,
     ResolutionConfidence,
@@ -58,6 +59,7 @@ def _resolve(*documents: EvidenceDocument):
 def test_registry_identity_and_capability_are_stable_and_bounded():
     assert PROFILE_REGISTRY == {
         "cisco.ios_xe.17@1.0.0": CISCO_IOS_XE_17,
+        "fortinet.fortios.7@1.0.0": FORTIOS_7,
     }
     assert CISCO_IOS_XE_17.profile_id == "cisco.ios_xe.17"
     assert CISCO_IOS_XE_17.profile_version == "1.0.0"
@@ -215,6 +217,34 @@ def test_unrelated_vendor_is_detected_without_selecting_cisco_profile():
     assert result.os_version == "23.4R1.9"
     assert result.selected_profile_id is None
     assert result.resolution_status == ResolutionStatus.UNSUPPORTED
+
+
+def test_fortios_7_selects_the_fortinet_profile():
+    result = _resolve(_document(
+        "FortiOS v7.4.3,build2573", evidence_type=ArtifactEvidenceType.CONFIGURATION
+    ))
+    assert result.vendor == "Fortinet"
+    assert result.product_family == "FortiGate"
+    assert result.os == "FortiOS" and result.os_version == "7.4.3"
+    assert result.selected_profile_version_id == FORTIOS_7.profile_version_id
+    assert result.resolution_status == ResolutionStatus.RESOLVED
+
+
+def test_cisco_evidence_is_not_misdetected_as_fortios():
+    result = _resolve(_document("Cisco IOS XE Software, Version 17.9.4a"))
+    assert result.vendor == "Cisco"
+    assert result.selected_profile_id != FORTIOS_7.profile_id
+
+
+def test_fortios_unsupported_or_ambiguous_evidence_fails_safely():
+    unsupported = _resolve(_document("FortiOS v6.4.15"))
+    conflict = _resolve(
+        _document("FortiOS v7.4.3", artifact_number=1),
+        _document("Cisco IOS XE Software, Version 17.9.4a", artifact_number=2),
+    )
+    assert unsupported.resolution_status == ResolutionStatus.UNSUPPORTED
+    assert unsupported.selected_profile_id is None
+    assert conflict.resolution_status == ResolutionStatus.CONFLICT
 
 
 def test_generic_model_number_does_not_create_cisco_identity():

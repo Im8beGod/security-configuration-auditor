@@ -74,6 +74,20 @@ _ACTIVE_MAPPING_POLICIES = tuple(
     )
     for mapping in CISCO_IOS_XE_17_KNOWLEDGE_PACK.mappings
 )
+_FORTIOS_PACK_ID = UUID("a1b2c3d4-2222-5aaa-8aaa-000000000013")
+_FORTIOS_MAPPING_POLICIES = tuple(
+    MappingOperationPolicy(_FORTIOS_PACK_ID, UUID(mapping_id), field_id, operation)
+    for mapping_id, field_id, operation in (
+        ("a1b2c3d4-4101-5aaa-8aaa-000000000013", "management.remote.telnet.enabled", FactOperation.ASSIGN),
+        ("a1b2c3d4-4201-5aaa-8aaa-000000000013", "management.remote.telnet.enabled", FactOperation.RESET),
+        ("a1b2c3d4-4102-5aaa-8aaa-000000000013", "management.remote.ssh.enabled", FactOperation.ASSIGN),
+        ("a1b2c3d4-4202-5aaa-8aaa-000000000013", "management.remote.ssh.enabled", FactOperation.RESET),
+        ("a1b2c3d4-4103-5aaa-8aaa-000000000013", "management.session.idle_timeout", FactOperation.ASSIGN),
+        ("a1b2c3d4-4203-5aaa-8aaa-000000000013", "management.session.idle_timeout", FactOperation.RESET),
+        ("a1b2c3d4-4104-5aaa-8aaa-000000000013", "logging.remote.destination", FactOperation.ASSIGN),
+        ("a1b2c3d4-4105-5aaa-8aaa-000000000013", "time.ntp.server", FactOperation.ASSIGN),
+    )
+)
 _ACTIVE_OPERATION_POLICIES = tuple(
     MappingOperationPolicy(
         knowledge_pack_version_id=CISCO_IOS_XE_17_KNOWLEDGE_PACK.knowledge_pack_version_id,
@@ -105,7 +119,7 @@ _LEGACY_MAPPING_POLICIES = tuple(
 MAPPING_OPERATION_POLICIES: Mapping[tuple[UUID, UUID], MappingOperationPolicy] = (
     MappingProxyType({
         (item.knowledge_pack_version_id, item.mapping_version_id): item
-        for item in _LEGACY_MAPPING_POLICIES + _ACTIVE_MAPPING_POLICIES + _ACTIVE_OPERATION_POLICIES
+        for item in _LEGACY_MAPPING_POLICIES + _ACTIVE_MAPPING_POLICIES + _FORTIOS_MAPPING_POLICIES + _ACTIVE_OPERATION_POLICIES
     })
 )
 

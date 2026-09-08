@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import MappingProxyType
 from uuid import uuid5
 
 from app.compliance.models import RULE_PACK_NAMESPACE, RuleDefinition, RulePack
 from app.compliance.verdicts import FindingSeverity
-from app.profile_resolution import CISCO_IOS_XE_17
+from app.profile_resolution import CISCO_IOS_XE_17, FORTIOS_7
 
 
 class RuleRegistryError(ValueError):
@@ -50,6 +51,13 @@ RULE_PACK = RulePack(
     profile_version_id=CISCO_IOS_XE_17.profile_version_id, rules=RULES,
 )
 
+FORTIOS_RULE_PACK = RulePack(
+    rule_pack_version_id=uuid5(RULE_PACK_NAMESPACE, "fortios_7_technical_baseline@1.0.0"),
+    name="fortios_7_technical_baseline", version="1.0.0",
+    profile_version_id=FORTIOS_7.profile_version_id,
+    rules=tuple(replace(rule, applicability=MappingProxyType({"profile_version_id": FORTIOS_7.profile_version_id})) for rule in RULES),
+)
+
 
 class RuleRegistry:
     def __init__(self, packs: tuple[RulePack, ...] = (RULE_PACK,)) -> None:
@@ -84,4 +92,10 @@ class RuleRegistry:
                 raise RuleRegistryError("Rule pack uses an unsupported operator")
 
 
-RULE_REGISTRY = RuleRegistry()
+RULE_REGISTRY = RuleRegistry((RULE_PACK, FORTIOS_RULE_PACK))
+
+
+RULE_PACK_BY_PROFILE = {
+    CISCO_IOS_XE_17.profile_version_id: RULE_PACK,
+    FORTIOS_7.profile_version_id: FORTIOS_RULE_PACK,
+}

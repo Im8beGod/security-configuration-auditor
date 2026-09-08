@@ -32,6 +32,8 @@ class NodeMatcher:
     arguments_prefix: tuple[str, ...] = ()
     parent_command: str | None = None
     parent_arguments_prefix: tuple[str, ...] = ()
+    ancestor_command: str | None = None
+    ancestor_arguments_prefix: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

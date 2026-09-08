@@ -13,11 +13,12 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17, PROFILE_REGISTRY, ProfileManifest
+from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, PROFILE_REGISTRY, ProfileManifest
 from app.profile_resolution.resolver import resolve_profile
 
 __all__ = [
     "CISCO_IOS_XE_17",
+    "FORTIOS_7",
     "EvidenceSignal",
     "MAX_ARTIFACT_INSPECTION_BYTES",
     "MAX_SNAPSHOT_ARTIFACTS",

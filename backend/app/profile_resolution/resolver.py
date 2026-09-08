@@ -14,7 +14,7 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17
+from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7
 
 
 MAX_LINE_CHARACTERS = 4096
@@ -310,6 +310,30 @@ def _resolve_candidates(
                 confidence=explicit_confidence,
                 status=ResolutionStatus.UNSUPPORTED,
                 reasons=("Detected IOS XE version is outside the supported 17.x profile",),
+            )
+
+        if (vendor, os_name) == ("Fortinet", "FortiOS"):
+            if version is None:
+                return _result(
+                    vendor=vendor, product_family="FortiGate", os_name=os_name,
+                    signals=signals, confidence=ResolutionConfidence.MEDIUM,
+                    status=ResolutionStatus.PARTIALLY_RESOLVED,
+                    reasons=("FortiOS version is required for profile applicability",),
+                )
+            if FORTIOS_7.version_constraint.accepts(version):
+                return _result(
+                    vendor=vendor, product_family="FortiGate", os_name=os_name,
+                    os_version=version, device_class=DeviceClass.FIREWALL,
+                    selected_profile_id=FORTIOS_7.profile_id,
+                    selected_profile_version_id=FORTIOS_7.profile_version_id,
+                    signals=signals, confidence=explicit_confidence,
+                    status=ResolutionStatus.RESOLVED,
+                )
+            return _result(
+                vendor=vendor, product_family="FortiGate", os_name=os_name,
+                os_version=version, signals=signals,
+                confidence=explicit_confidence, status=ResolutionStatus.UNSUPPORTED,
+                reasons=("Detected FortiOS version is outside the supported 7.x profile",),
             )
 
         return _result(

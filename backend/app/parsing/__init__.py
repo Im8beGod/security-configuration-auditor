@@ -14,7 +14,7 @@ from app.parsing.models import (
     StructuralIR,
 )
 from app.parsing.reader_registry import READER_REGISTRY
-from app.parsing.readers import INDENTATION_CLI_READER_ID
+from app.parsing.readers import FORTIOS_CLI_READER_ID, INDENTATION_CLI_READER_ID
 from app.parsing.service import parse_artifact, parse_configuration_text
 
 __all__ = [
@@ -24,6 +24,7 @@ __all__ = [
     "ConfigNodeKind",
     "DiagnosticSeverity",
     "INDENTATION_CLI_READER_ID",
+    "FORTIOS_CLI_READER_ID",
     "ParseDiagnostic",
     "ParseStatus",
     "ParsingInfrastructureError",

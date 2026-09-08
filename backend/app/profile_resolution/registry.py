@@ -82,6 +82,43 @@ CISCO_IOS_XE_17 = ProfileManifest(
     }),
 )
 
+FORTIOS_7 = ProfileManifest(
+    profile_id="fortinet.fortios.7",
+    profile_version_id="fortinet.fortios.7@1.0.0",
+    profile_version="1.0.0",
+    vendor="Fortinet",
+    product_family="FortiGate",
+    os="FortiOS",
+    version_constraint=VersionConstraint(frozenset({7})),
+    device_classes=frozenset({DeviceClass.FIREWALL}),
+    accepted_evidence_types=frozenset(ArtifactEvidenceType),
+    structural_reader_name="fortios_cli.v1",
+    knowledge_pack_name="fortios_7@1.0.0",
+    capabilities=frozenset({
+        "profile_detection", "structural_parsing", "semantic_interpretation",
+        "effective_state_resolution", "deterministic_compliance",
+    }),
+    coverage_manifest=MappingProxyType({
+        "profile_detection": True,
+        "structural_parsing": True,
+        "semantic_interpretation": True,
+        "effective_state_resolution": True,
+        "deterministic_compliance": True,
+        "supported_version_family": "FortiOS 7.x",
+        "structural_reader": "fortios_cli.v1",
+        "canonical_fields": (
+            "management.remote.telnet.enabled",
+            "management.remote.ssh.enabled",
+            "management.session.idle_timeout",
+            "logging.remote.destination",
+            "time.ntp.server",
+        ),
+    }),
+)
+
 PROFILE_REGISTRY: Mapping[str, ProfileManifest] = MappingProxyType(
-    {CISCO_IOS_XE_17.profile_version_id: CISCO_IOS_XE_17}
+    {
+        CISCO_IOS_XE_17.profile_version_id: CISCO_IOS_XE_17,
+        FORTIOS_7.profile_version_id: FORTIOS_7,
+    }
 )

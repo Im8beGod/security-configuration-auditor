@@ -14,7 +14,7 @@ from app.audit.errors import (
 )
 from app.audit.service import resolve_audit_profile
 from app.compliance.policy import PolicyRegistryError, select_policy_version
-from app.compliance.rule_registry import RULE_PACK, RULE_REGISTRY, RuleRegistryError
+from app.compliance.rule_registry import RULE_PACK_BY_PROFILE, RULE_REGISTRY, RuleRegistryError
 from app.compliance.service import ComplianceError, persist_audit_findings
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import Audit, AuditProcessingStage, AuditStatus, EffectiveState, Finding
@@ -112,7 +112,9 @@ class AuditPipelineCoordinator:
                 db, audit_id=audit_id, organization_id=organization_id
             )
             self._commit(db, "effective_state_persistence_failed")
-        self._pin_compliance_versions_and_set_stage(audit_id, organization_id)
+        self._pin_compliance_versions_and_set_stage(
+            audit_id, organization_id, resolution.selected_profile_version_id
+        )
         stages.append(AuditProcessingStage.EVALUATING)
         with self._factory() as db:
             # Compliance receives a fresh canonical database read, never resolver output.
@@ -143,7 +145,7 @@ class AuditPipelineCoordinator:
             resolution, interpretation, effective_states, findings, tuple(stages)
         )
 
-    def _pin_compliance_versions_and_set_stage(self, audit_id: UUID, organization_id: UUID) -> None:
+    def _pin_compliance_versions_and_set_stage(self, audit_id: UUID, organization_id: UUID, profile_version_id: str) -> None:
         with self._factory() as db:
             audit = db.scalar(select(Audit).where(
                 Audit.audit_id == audit_id, Audit.organization_id == organization_id
@@ -151,7 +153,10 @@ class AuditPipelineCoordinator:
             if audit is None or audit.status is not AuditStatus.PROCESSING:
                 raise AuditConflictError("audit_not_processing", "Audit is not processing")
             existing_packs = audit.version_refs.get("rule_pack_versions")
-            expected_pack = str(RULE_PACK.rule_pack_version_id)
+            expected_rule_pack = RULE_PACK_BY_PROFILE.get(profile_version_id)
+            if expected_rule_pack is None:
+                raise AuditConflictError("audit_version_conflict", "Audit compliance versions are unavailable")
+            expected_pack = str(expected_rule_pack.rule_pack_version_id)
             if existing_packs is None:
                 packs = [expected_pack]
             elif isinstance(existing_packs, list) and expected_pack in existing_packs:

@@ -69,6 +69,34 @@ def extract_ntp_server(node: ConfigNode) -> ExtractionOutcome:
     return _extract_endpoint(node, prefix="server", diagnostic="invalid_ntp_server")
 
 
+def extract_fortios_server(node: ConfigNode) -> ExtractionOutcome:
+    return _extract_endpoint(node, prefix="server", diagnostic="invalid_fortios_server")
+
+
+def extract_fortios_port_enabled(node: ConfigNode) -> ExtractionOutcome:
+    if len(node.arguments) != 2 or node.arguments[0].lower() not in {
+        "admin-ssh-port", "admin-telnet-port"
+    } or not INTEGER_PATTERN.fullmatch(node.arguments[1]):
+        return ExtractionOutcome(None, "invalid_fortios_port")
+    return ExtractionOutcome(TypedValue(
+        type=TypedValueType.BOOLEAN,
+        value=int(node.arguments[1]) > 0,
+        original_value=" ".join(node.arguments),
+    ))
+
+
+def extract_fortios_timeout(node: ConfigNode) -> ExtractionOutcome:
+    if len(node.arguments) != 2 or node.arguments[0].lower() != "admintimeout" or not INTEGER_PATTERN.fullmatch(node.arguments[1]):
+        return ExtractionOutcome(None, "invalid_fortios_timeout")
+    minutes = int(node.arguments[1])
+    if minutes > 35_791:
+        return ExtractionOutcome(None, "invalid_fortios_timeout")
+    return ExtractionOutcome(TypedValue(
+        type=TypedValueType.DURATION, value=minutes * 60, unit="seconds",
+        original_value=node.arguments[1], original_unit="minutes",
+    ))
+
+
 def _extract_transport_protocol(node: ConfigNode, protocol: str) -> ExtractionOutcome:
     if len(node.arguments) < 2 or node.arguments[0].lower() != "input":
         return ExtractionOutcome(None, "invalid_transport_input")
@@ -98,7 +126,7 @@ def _extract_endpoint(
 ) -> ExtractionOutcome:
     if len(node.arguments) != 2 or node.arguments[0].lower() != prefix:
         return ExtractionOutcome(None, diagnostic)
-    original = node.arguments[1]
+    original = node.arguments[1].strip('"')
     try:
         canonical = str(ip_address(original))
     except ValueError:
@@ -123,4 +151,7 @@ EXTRACTORS = {
     "ssh_version": extract_ssh_version,
     "logging_destination": extract_logging_destination,
     "ntp_server": extract_ntp_server,
+    "fortios_server": extract_fortios_server,
+    "fortios_port_enabled": extract_fortios_port_enabled,
+    "fortios_timeout": extract_fortios_timeout,
 }

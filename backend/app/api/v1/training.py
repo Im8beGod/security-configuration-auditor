@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.training.ai import AISuggestionProvider, AISuggestionUnavailable, DisabledAISuggestionProvider
 from app.training.schemas import (
     CanonicalFieldResponse, ImpactResponse, KnowledgePackResponse, KnowledgePackVersionResponse,
-    MappingCreateRequest, MappingResponse, MappingUpdateRequest, ReviewUpdateRequest,
+    MappingCreateRequest, MappingResponse, MappingUpdateRequest, MappingValidationRequest, ReviewUpdateRequest,
     PublicationResponse, UnresolvedResponse, ValidationRequestResponse,
 )
 from app.training.service import (
@@ -20,6 +20,7 @@ from app.training.service import (
     suggest_mapping, update_mapping, update_review_status,
 )
 from app.security_model import FIELD_REGISTRY
+from app.profile_resolution import PROFILE_REGISTRY
 
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -34,6 +35,25 @@ def get_ai_suggestion_provider() -> AISuggestionProvider:
 def canonical_fields(user: TrainingAdmin):
     del user
     return [{"field_id": field.field_id, "expected_types": sorted(item.value for item in field.expected_types), "allowed_scope_types": sorted(field.allowed_scope_types), "domain": field.domain, "description": field.description, "repeatable": field.repeatable} for field in FIELD_REGISTRY.values()]
+
+
+@router.get("/capabilities")
+def training_capabilities(user: TrainingAdmin):
+    del user
+    return {
+        "mapping_definition": {
+            "structural_operations": ["command_equality", "command_prefix", "xml_path"],
+            "argument_operations": ["literal", "capture", "optional", "one_of"],
+            "extraction_operations": ["capture", "constant", "boolean_from_presence", "enum_mapping", "integer", "number", "list", "duration_from_parts"],
+            "validation_families": ["positive", "alternate_values", "negative", "wrong_scope", "negation", "conflict", "regression"],
+        }
+    }
+
+
+@router.get("/profiles")
+def training_profiles(user: TrainingAdmin):
+    del user
+    return [{"profile_id": item.profile_id, "profile_version_id": item.profile_version_id, "vendor": item.vendor, "product_family": item.product_family, "os": item.os, "reader": item.structural_reader_name, "coverage": dict(item.coverage_manifest), "capabilities": sorted(item.capabilities)} for item in PROFILE_REGISTRY.values()]
 
 
 def _raise(error: Exception) -> None:
@@ -100,9 +120,9 @@ def mapping_update(mapping_version_id: UUID, request: MappingUpdateRequest, user
 
 
 @router.post("/mappings/{mapping_version_id}/validate", response_model=ValidationRequestResponse, status_code=202)
-def mapping_validate(mapping_version_id: UUID, user: TrainingAdmin, db: Annotated[Session, Depends(get_db)]):
+def mapping_validate(mapping_version_id: UUID, user: TrainingAdmin, db: Annotated[Session, Depends(get_db)], request: MappingValidationRequest | None = None):
     try:
-        run, job = request_validation(db, user, mapping_version_id)
+        run, job = request_validation(db, user, mapping_version_id, evidence_artifact_id=request.evidence_artifact_id if request else None)
         return ValidationRequestResponse(validation_run_id=run.validation_run_id, job_id=job.job_id, status=run.status)
     except Exception as error:
         db.rollback(); _raise(error)

@@ -26,18 +26,19 @@ def parse_artifact(
 ) -> StructuralIR:
     if artifact.organization_id != organization_id:
         raise ArtifactNotParseableError("artifact_not_found", "Artifact not found")
-    if artifact.evidence_type != ArtifactEvidenceType.CONFIGURATION:
-        raise ArtifactNotParseableError(
-            "artifact_not_configuration", "Artifact is not configuration evidence"
-        )
-    if artifact.status not in ELIGIBLE_ARTIFACT_STATUSES:
-        raise ArtifactNotParseableError(
-            "artifact_not_eligible", "Artifact is not eligible for structural parsing"
-        )
     profile = PROFILE_REGISTRY.get(profile_version_id)
     if profile is None or profile.structural_reader_name is None:
         raise StructuralReaderNotFoundError(
             "structural_reader_unavailable", "No structural reader is available"
+        )
+    if artifact.evidence_type not in profile.structural_evidence_types:
+        raise ArtifactNotParseableError(
+            "artifact_evidence_incompatible",
+            "Artifact evidence is incompatible with the selected profile",
+        )
+    if artifact.status not in ELIGIBLE_ARTIFACT_STATUSES:
+        raise ArtifactNotParseableError(
+            "artifact_not_eligible", "Artifact is not eligible for structural parsing"
         )
     try:
         content = storage.read_prefix(artifact.storage_reference, MAX_CONFIGURATION_BYTES)

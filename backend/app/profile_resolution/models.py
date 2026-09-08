@@ -43,6 +43,7 @@ class EvidenceSignal:
     strength: SignalStrength
     extracted_fields: tuple[str, ...] = ()
     source_label: str | None = None
+    source_path: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -73,13 +74,16 @@ class ProfileResolutionResult:
         provenance: dict[str, list[dict[str, Any]]] = {}
         for signal in self.supporting_signals:
             for field in signal.extracted_fields:
-                provenance.setdefault(field, []).append({
+                item = {
                     "artifact_id": str(signal.artifact_id),
                     "source": signal.source_label,
                     "line": signal.line_number,
                     "basis": signal.signal_id,
                     "confidence": signal.strength.value,
-                })
+                }
+                if signal.source_path is not None:
+                    item["path"] = list(signal.source_path)
+                provenance.setdefault(field, []).append(item)
         return provenance
 
     def to_persisted(self) -> dict[str, Any]:

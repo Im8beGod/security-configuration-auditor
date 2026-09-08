@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import Literal, Mapping
 
 from app.db.models import ArtifactEvidenceType, DeviceClass
 
@@ -28,7 +28,7 @@ class VersionConstraint:
 
     @staticmethod
     def parse(version: str | None) -> tuple[int, ...] | None:
-        if not version or not re.fullmatch(r"\d+(?:\.\d+)*[A-Za-z0-9-]*", version):
+        if not version or not re.fullmatch(r"\d+(?:\.\d+)*[A-Za-z0-9.-]*", version):
             return None
         numbers = re.match(r"(\d+(?:\.\d+)*)", version)
         return tuple(int(item) for item in numbers.group(1).split(".")) if numbers else None
@@ -52,11 +52,44 @@ class ProfileManifest:
     manifest_schema_version: str = "1.0.0"
     exclusions: frozenset[str] = frozenset()
     detection_tokens: tuple[str, ...] = ()
+    xml_identity_selectors: tuple["XmlIdentitySelector", ...] = ()
+    structural_evidence_types: frozenset[ArtifactEvidenceType] = frozenset({ArtifactEvidenceType.CONFIGURATION})
 
     def applicability(self, version: str | None) -> str:
         if version is None:
             return "version_unknown"
         return "compatible" if self.version_constraint.accepts(version) and version not in self.exclusions else "incompatible"
+
+
+@dataclass(frozen=True)
+class XmlIdentitySelector:
+    """Bounded manifest-declared identity lookup over xml_tree.v1 paths."""
+
+    field: Literal["os_version", "hostname", "model", "serial_number"]
+    path: tuple[str, ...]
+    namespace_uris: tuple[str | None, ...] = ()
+    source: Literal["text", "attribute"] = "text"
+    attribute: str | None = None
+
+    def matches(self, node_path: tuple[str, ...], *, attributes: tuple[tuple[str, str], ...], text: str | None) -> str | None:
+        if len(node_path) != len(self.path):
+            return None
+        if self.namespace_uris and len(self.namespace_uris) != len(self.path):
+            return None
+        for actual, expected, expected_namespace in zip(node_path, self.path, self.namespace_uris or (None,) * len(self.path)):
+            namespace, local = _xml_name(actual.rsplit("[", 1)[0])
+            if local != expected or (expected_namespace is not None and namespace != expected_namespace):
+                return None
+        if self.source == "attribute":
+            return dict(attributes).get(self.attribute or "")
+        return text
+
+
+def _xml_name(tag: str) -> tuple[str | None, str]:
+    if tag.startswith("{") and "}" in tag:
+        namespace, local = tag[1:].split("}", 1)
+        return namespace, local
+    return None, tag
 
 
 def compatible_manifests(vendor: str, os_name: str, version: str | None) -> tuple[ProfileManifest, ...]:
@@ -149,9 +182,36 @@ FORTIOS_7 = ProfileManifest(
     }),
 )
 
+JUNIPER_JUNOS_18 = ProfileManifest(
+    profile_id="juniper.junos.18",
+    profile_version_id="juniper.junos.18@1.0.0",
+    profile_version="1.0.0",
+    vendor="Juniper",
+    product_family="Junos",
+    os="Junos",
+    version_constraint=VersionConstraint(minimum_version=(18, 4), maximum_version=(18, 4)),
+    device_classes=frozenset({DeviceClass.ROUTER, DeviceClass.SWITCH, DeviceClass.FIREWALL}),
+    accepted_evidence_types=frozenset(ArtifactEvidenceType),
+    structural_reader_name="xml_tree.v1",
+    knowledge_pack_name="juniper_junos_18@1.0.0",
+    capabilities=frozenset({"profile_detection", "structural_parsing", "semantic_interpretation", "effective_state_resolution", "deterministic_compliance"}),
+    coverage_manifest=MappingProxyType({
+        "supported_version_family": "Junos 18.4 XML configuration",
+        "structural_reader": "xml_tree.v1",
+        "canonical_fields": ("management.remote.ssh.enabled", "logging.remote.destination", "time.ntp.server"),
+        "limitations": ("reviewed 18.4R1-S2.4 scope only", "no model or serial inference from XML configuration", "unsupported structures remain UNKNOWN"),
+    }),
+    xml_identity_selectors=(
+        XmlIdentitySelector("os_version", ("rpc-reply", "configuration", "version")),
+        XmlIdentitySelector("hostname", ("rpc-reply", "configuration", "system", "host-name")),
+    ),
+    structural_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
+)
+
 PROFILE_REGISTRY: Mapping[str, ProfileManifest] = MappingProxyType(
     {
         CISCO_IOS_XE_17.profile_version_id: CISCO_IOS_XE_17,
         FORTIOS_7.profile_version_id: FORTIOS_7,
+        JUNIPER_JUNOS_18.profile_version_id: JUNIPER_JUNOS_18,
     }
 )

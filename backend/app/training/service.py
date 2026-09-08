@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections import Counter
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import (
-    Audit, Finding, Job, KnowledgePackRecord, KnowledgePackVersionRecord,
+    Artifact, ArtifactStatus, Audit, Finding, Job, KnowledgePackRecord, KnowledgePackVersionRecord,
     MappingOrigin, MappingStatus, MappingValidationRun, MappingVersion,
-    UnresolvedBlock, UnresolvedReviewStatus, User, UserRole, ValidationRunStatus,
+    Snapshot, SnapshotStatus, UnresolvedBlock, UnresolvedReviewStatus, User, UserRole, ValidationRunStatus,
 )
 from app.db.models.common import utc_now
 from app.jobs.enums import JobType
@@ -123,15 +123,27 @@ def update_mapping(db: Session, user: User, mapping_version_id: UUID, *, title: 
     return mapping
 
 
-def request_validation(db: Session, user: User, mapping_version_id: UUID) -> tuple[MappingValidationRun, Job]:
+def request_validation(db: Session, user: User, mapping_version_id: UUID, *, evidence_artifact_id: UUID | None = None) -> tuple[MappingValidationRun, Job]:
     mapping = _mapping(db, user, mapping_version_id, lock=True)
     if mapping.status not in {MappingStatus.DRAFT, MappingStatus.TESTING}:
         raise TrainingConflict("Mapping is not eligible for validation")
     MappingDefinition.model_validate(_definition_payload(mapping))
-    run = MappingValidationRun(organization_id=user.organization_id, mapping_version_id=mapping.mapping_version_id, status=ValidationRunStatus.PENDING, results={})
+    if evidence_artifact_id is not None:
+        artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == evidence_artifact_id, Artifact.organization_id == user.organization_id))
+        if artifact is None or artifact.status is not ArtifactStatus.READY:
+            raise TrainingConflict("Selected evidence artifact is not ready")
+        profile_ids = set((mapping.profile_applicability or {}).get("profile_version_ids", []))
+        if not profile_ids:
+            raise TrainingConflict("Profile applicability is required for evidence validation")
+        if artifact.snapshot_id is None:
+            raise TrainingConflict("Selected evidence must belong to a snapshot")
+        snapshot = db.get(Snapshot, artifact.snapshot_id)
+        if snapshot is None or snapshot.organization_id != user.organization_id or snapshot.status not in {SnapshotStatus.READY, SnapshotStatus.LOCKED}:
+            raise TrainingConflict("Selected evidence snapshot is not ready")
+    run = MappingValidationRun(organization_id=user.organization_id, mapping_version_id=mapping.mapping_version_id, status=ValidationRunStatus.PENDING, results={"evidence_artifact_id": str(evidence_artifact_id) if evidence_artifact_id else None})
     db.add(run)
     db.flush()
-    job = enqueue_job(db, JobType.MAPPING_VALIDATION, payload={"mapping_version_id": str(mapping.mapping_version_id), "validation_run_id": str(run.validation_run_id), "organization_id": str(user.organization_id)}, stage="mapping_validation")
+    job = enqueue_job(db, JobType.MAPPING_VALIDATION, payload={"mapping_version_id": str(mapping.mapping_version_id), "validation_run_id": str(run.validation_run_id), "organization_id": str(user.organization_id), "evidence_artifact_id": str(evidence_artifact_id) if evidence_artifact_id else None}, stage="mapping_validation")
     mapping.status = MappingStatus.TESTING
     db.commit()
     return run, job
@@ -144,7 +156,8 @@ def execute_validation(db: Session, validation_run_id: UUID, mapping_version_id:
         raise TrainingConflict("Mapping validation payload is invalid")
     run.status = ValidationRunStatus.RUNNING
     definition = MappingDefinition.model_validate(_definition_payload(mapping))
-    results = validate_definition(db, mapping, definition)
+    evidence_artifact_id = run.results.get("evidence_artifact_id")
+    results = validate_definition(db, mapping, definition, evidence_artifact_id=UUID(evidence_artifact_id) if evidence_artifact_id else None)
     run.status = ValidationRunStatus.PASSED if results["passed"] else ValidationRunStatus.FAILED
     run.results = results
     run.completed_at = utc_now()
@@ -153,7 +166,7 @@ def execute_validation(db: Session, validation_run_id: UUID, mapping_version_id:
     return run
 
 
-def validate_definition(db: Session, mapping: MappingVersion, definition: MappingDefinition) -> dict[str, Any]:
+def validate_definition(db: Session, mapping: MappingVersion, definition: MappingDefinition, *, evidence_artifact_id: UUID | None = None) -> dict[str, Any]:
     families: dict[str, list[dict[str, Any]]] = {name: [] for name in VALIDATION_FAMILIES}
     for example in definition.examples:
         matched, captures = matches(definition, example.node)
@@ -166,15 +179,23 @@ def validate_definition(db: Session, mapping: MappingVersion, definition: Mappin
                 error = "extraction_failed"
         passed = matched == example.expected_match and (not matched or example.expected_value is None or value == example.expected_value) and error is None
         families[example.family].append({"passed": passed, "matched": matched, "value": value, "error": error})
+    semantic: dict[str, Any] | None = None
+    if evidence_artifact_id is not None:
+        semantic = _validate_against_artifact(db, mapping, definition, evidence_artifact_id)
     relevant = repository.published_mappings(db, mapping.organization_id)
     regressions = families["regression"]
     collision = any(item.mapping_id != mapping.mapping_id and item.target_field_id == mapping.target_field_id and item.structural_match == mapping.structural_match for item in relevant)
     family_results = {family: bool(cases) and all(case["passed"] for case in cases) for family, cases in families.items()}
+    if evidence_artifact_id is not None and not definition.examples:
+        family_results = {family: True for family in VALIDATION_FAMILIES}
     if collision:
         family_results["regression"] = False
         regressions.append({"passed": False, "error": "published_mapping_collision"})
     digest = _digest(definition)
-    return {"passed": all(family_results.values()), "families": family_results, "cases": families, "definition_digest": digest}
+    profile_digest = _profile_digest(definition)
+    content_digest = _content_digest(definition)
+    passed = all(family_results.values()) and (semantic is None or semantic["status"] == "matched")
+    return {"passed": passed, "families": family_results, "cases": families, "semantic": semantic, "definition_digest": digest, "profile_digest": profile_digest, "content_digest": content_digest, "validation_digest": _validation_digest(digest, profile_digest, content_digest, semantic.get("evidence_digest") if semantic else None)}
 
 
 def approve_mapping(db: Session, user: User, mapping_version_id: UUID) -> MappingVersion:
@@ -182,7 +203,7 @@ def approve_mapping(db: Session, user: User, mapping_version_id: UUID) -> Mappin
     mapping = _mapping(db, user, mapping_version_id, lock=True)
     validation = repository.latest_validation(db, mapping.mapping_version_id)
     definition = MappingDefinition.model_validate(_definition_payload(mapping))
-    if mapping.status != MappingStatus.TESTING or validation is None or validation.status != ValidationRunStatus.PASSED or validation.results.get("definition_digest") != _digest(definition):
+    if mapping.status != MappingStatus.TESTING or validation is None or validation.status != ValidationRunStatus.PASSED or not _validation_is_current(db, mapping, validation.results, definition):
         raise TrainingConflict("Current successful validation is required")
     mapping.status, mapping.approved_by, mapping.approved_at = MappingStatus.APPROVED, user.user_id, utc_now()
     db.commit()
@@ -204,7 +225,7 @@ def publish_mapping(db: Session, user: User, mapping_version_id: UUID) -> tuple[
     mapping = _mapping(db, user, mapping_version_id, lock=True)
     definition = MappingDefinition.model_validate(_definition_payload(mapping))
     validation = repository.latest_validation(db, mapping.mapping_version_id)
-    if mapping.status != MappingStatus.APPROVED or mapping.approved_by is None or validation is None or validation.status != ValidationRunStatus.PASSED or validation.results.get("definition_digest") != _digest(definition):
+    if mapping.status != MappingStatus.APPROVED or mapping.approved_by is None or validation is None or validation.status != ValidationRunStatus.PASSED or not _validation_is_current(db, mapping, validation.results, definition):
         raise TrainingConflict("Approved, currently validated mapping is required")
     profile_ids = definition.profile_applicability.profile_version_ids
     if not profile_ids or any(profile_id not in PROFILE_REGISTRY for profile_id in profile_ids):
@@ -298,6 +319,74 @@ def _require_admin(user: User) -> None:
 
 def _digest(definition: MappingDefinition) -> str:
     return hashlib.sha256(json.dumps(definition.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _profile_digest(definition: MappingDefinition) -> str:
+    payload = []
+    for profile_id in sorted(definition.profile_applicability.profile_version_ids):
+        profile = PROFILE_REGISTRY.get(profile_id)
+        payload.append({"profile_version_id": profile_id, "manifest": profile.coverage_manifest if profile else None})
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
+
+
+def _content_digest(definition: MappingDefinition) -> str:
+    examples = [item.model_dump(mode="json") for item in definition.examples]
+    return hashlib.sha256(json.dumps(examples, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _validation_digest(definition_digest: str, profile_digest: str, content_digest: str, evidence_digest: str | None = None) -> str:
+    return hashlib.sha256(f"{definition_digest}:{profile_digest}:{content_digest}:{evidence_digest or ''}".encode()).hexdigest()
+
+
+def _validation_is_current(db: Session, mapping: MappingVersion, results: dict[str, Any], definition: MappingDefinition) -> bool:
+    definition_digest = _digest(definition)
+    profile_digest = _profile_digest(definition)
+    content_digest = _content_digest(definition)
+    evidence_digest = None
+    semantic = results.get("semantic") or {}
+    evidence_id = semantic.get("evidence_artifact_id")
+    if evidence_id:
+        artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == UUID(evidence_id), Artifact.organization_id == mapping.organization_id))
+        if artifact is None:
+            return False
+        evidence_digest = artifact.sha256
+    return results.get("definition_digest") == definition_digest and results.get("profile_digest") == profile_digest and results.get("content_digest") == content_digest and results.get("validation_digest") == _validation_digest(definition_digest, profile_digest, content_digest, evidence_digest)
+
+
+def _validate_against_artifact(db: Session, mapping: MappingVersion, definition: MappingDefinition, evidence_artifact_id: UUID) -> dict[str, Any]:
+    from app.effective_state.policy import FactOperation
+    from app.effective_state.resolver import resolve_security_facts
+    from app.ingestion.storage import get_artifact_storage
+    from app.interpretation.knowledge_pack import KnowledgePack
+    from app.interpretation.service import _to_orm, _training_mapping, interpret_xml_structural_ir
+    from app.parsing import parse_artifact
+
+    artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == evidence_artifact_id, Artifact.organization_id == mapping.organization_id))
+    if artifact is None or artifact.status is not ArtifactStatus.READY or artifact.snapshot_id is None:
+        raise TrainingConflict("Selected evidence artifact is not eligible")
+    snapshot = db.get(Snapshot, artifact.snapshot_id)
+    if snapshot is None or snapshot.organization_id != mapping.organization_id or snapshot.status not in {SnapshotStatus.READY, SnapshotStatus.LOCKED}:
+        raise TrainingConflict("Selected evidence snapshot is not eligible")
+    profile_version_id = (definition.profile_applicability.profile_version_ids or [None])[0]
+    if profile_version_id is None:
+        raise TrainingConflict("Evidence validation requires a profile version")
+    ir = parse_artifact(get_artifact_storage(), artifact, profile_version_id=profile_version_id, organization_id=mapping.organization_id)
+    mapping_adapter = _training_mapping(mapping, profile_version_id)
+    pack_id = uuid5(NAMESPACE_URL, f"validation-pack:{mapping.mapping_version_id}")
+    pack = KnowledgePack(pack_id, pack_id, "Validation candidate", "validation", "1.0.0", profile_version_id.split("@", 1)[0], profile_version_id, (mapping_adapter,))
+    context_id = uuid5(NAMESPACE_URL, f"validation-audit:{mapping.mapping_version_id}:{artifact.artifact_id}")
+    from app.interpretation.models import InterpretationContext
+    result = interpret_xml_structural_ir(ir, InterpretationContext(context_id, snapshot.device_id, snapshot.snapshot_id), profile_version_id=profile_version_id, knowledge_pack=pack)
+    transient_facts = tuple(_to_orm(item) for item in result.facts)
+    states = resolve_security_facts(audit_id=context_id, device_id=snapshot.device_id, facts=transient_facts, operations={item.fact_id: FactOperation.ASSIGN for item in transient_facts})
+    matches = []
+    from app.training.dsl import matches_xml, xml_match_has_unsupported_qualifier
+    for node, captures in matches_xml(definition, ir):
+        matches.append({"path": list(node.path), "node_id": node.node_id, "captures": captures, "status": "excluded_unsupported_scope" if xml_match_has_unsupported_qualifier(definition, ir, node) else "matched"})
+    facts = [{"field_id": item.field_id, "value": item.value, "state": item.state, "evidence_refs": item.evidence_refs, "mapping_version_id": str(item.mapping_version_id)} for item in transient_facts]
+    effective_states = [{"field_id": item.field_id, "scope": item.scope.to_dict(), "resolution_status": item.resolution_status.value, "effective_value": item.effective_value.to_dict() if item.effective_value else None, "source_fact_ids": [str(value) for value in item.source_fact_ids]} for item in states]
+    status = "matched" if matches else "no_match"
+    return {"status": status, "evidence_artifact_id": str(artifact.artifact_id), "evidence_filename": artifact.original_filename, "evidence_digest": artifact.sha256, "snapshot_id": str(snapshot.snapshot_id), "profile_version_id": profile_version_id, "reader_id": ir.reader_id, "matched_paths": matches, "facts": facts, "effective_states": effective_states, "diagnostics": [{"code": item.code, "node_id": item.node_id} for item in result.diagnostics]}
 
 
 def _block_matches(definition: MappingDefinition, block: UnresolvedBlock) -> bool:

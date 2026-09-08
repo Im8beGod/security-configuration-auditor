@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import re
 from xml.etree import ElementTree
 
 from app.parsing.models import ArtifactProvenance, StructuralParseRequest
@@ -40,7 +41,7 @@ class XmlTreeReader:
 
     def parse(self, request: StructuralParseRequest) -> XmlStructuralIR:
         content = request.content[:MAX_XML_INPUT_CHARACTERS]
-        if any(token in content[:MAX_XML_INPUT_CHARACTERS].upper() for token in ("<!DOCTYPE", "<!ENTITY", "SYSTEM", "PUBLIC")):
+        if re.search(r"<!\s*(?:DOCTYPE|ENTITY|ELEMENT|ATTLIST)\b|\b(?:SYSTEM|PUBLIC)\s+['\"]", content[:MAX_XML_INPUT_CHARACTERS], re.IGNORECASE):
             raise ValueError("XML DTD and entity declarations are not supported")
         if len(request.content) > MAX_XML_INPUT_CHARACTERS:
             raise ValueError("XML input exceeds the bounded size limit")
@@ -65,8 +66,10 @@ class XmlTreeReader:
             node_id = "xmln_" + sha256(f"{request.source.artifact_id}|{path}|{order}".encode()).hexdigest()[:32]
             node = XmlNode(node_id, path, element.tag, tuple(sorted(element.attrib.items())), text, parent_id, order, request.source)
             nodes.append(node)
-            for index, child in enumerate(list(element), start=1):
-                visit(child, node_id, path + (f"{child.tag}[{index}]",), depth + 1)
+            occurrences: dict[str, int] = {}
+            for child in list(element):
+                occurrences[child.tag] = occurrences.get(child.tag, 0) + 1
+                visit(child, node_id, path + (f"{child.tag}[{occurrences[child.tag]}]",), depth + 1)
 
         visit(root, None, (f"{root.tag}[1]",), 0)
         return XmlStructuralIR(self.reader_id, request.source, tuple(nodes), (), truncated or request.input_truncated)

@@ -57,7 +57,7 @@ export interface MappingVersion extends Omit<MappingDefinition, 'profile_applica
   description: string
   status: MappingStatus
   profile_applicability: { profile_ids?: string[]; profile_version_ids: string[] }
-  validation_results: { passed?: boolean; families?: Partial<Record<ValidationFamily, boolean>> }
+  validation_results: Record<string, unknown> & { passed?: boolean; families?: Partial<Record<ValidationFamily, boolean>> }
   origin: 'built_in' | 'administrator' | 'ai_assisted'
   ai_suggestion_metadata: { confidence?: number; similar_mapping_refs?: string[]; provider?: Record<string, string> } | null
   created_by: string | null
@@ -82,3 +82,4 @@ export interface ImpactAnalysis {
 }
 export interface KnowledgePack { knowledge_pack_id: string; pack_key: string; name: string; created_at: string }
 export interface KnowledgePackVersion { knowledge_pack_version_id: string; knowledge_pack_id: string; version: number; previous_knowledge_pack_version_id: string | null; mapping_version_ids: string[]; published_by: string; published_at: string }
+export interface TrainingProfile { profile_id: string; profile_version_id: string; vendor: string; product_family: string; os: string; reader: string | null; coverage: Record<string, unknown>; capabilities: string[] }

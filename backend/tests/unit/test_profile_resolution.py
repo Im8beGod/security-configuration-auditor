@@ -12,6 +12,7 @@ from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.profile_resolution import (
     CISCO_IOS_XE_17,
     FORTIOS_7,
+    JUNIPER_JUNOS_18,
     MAX_ARTIFACT_INSPECTION_BYTES,
     PROFILE_REGISTRY,
     ResolutionConfidence,
@@ -60,6 +61,7 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
     assert PROFILE_REGISTRY == {
         "cisco.ios_xe.17@1.0.0": CISCO_IOS_XE_17,
         "fortinet.fortios.7@1.0.0": FORTIOS_7,
+        "juniper.junos.18@1.0.0": JUNIPER_JUNOS_18,
     }
     assert CISCO_IOS_XE_17.profile_id == "cisco.ios_xe.17"
     assert CISCO_IOS_XE_17.profile_version == "1.0.0"

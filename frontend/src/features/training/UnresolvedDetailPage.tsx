@@ -58,6 +58,19 @@ function buildDefinition(field: CanonicalField, profileVersion: string, command:
   }
 }
 
+function starterXmlDefinition(field: CanonicalField, profileVersion: string, block: UnresolvedBlock): MappingDefinition {
+  const path = Array.isArray(block.occurrence.xml_path) ? block.occurrence.xml_path.map((item) => ({ local_name: String(item).replace(/^.*}/, '').replace(/\[\d+\]$/, ''), occurrence: 'exact' })) : []
+  const presence = String(block.occurrence.tag ?? '').replace(/^.*}/, '') === 'ssh'
+  return {
+    profile_applicability: { profile_version_ids: [profileVersion] },
+    structural_match: { operation: 'xml_path', command: 'xml', xml_path: { path, source: presence ? 'presence' : 'text', capture: presence ? null : 'value', value_type: presence ? 'boolean' : 'string', start_mode: 'document_root' } },
+    target_field_id: field.field_id,
+    value_extraction: { operation: presence ? 'boolean_from_presence' : 'capture', ...(presence ? {} : { capture: 'value' }), output_type: presence ? 'boolean' : 'string' },
+    unit_conversion: { operation: 'none' }, scope_resolution: { strategy: field.allowed_scope_types.includes('device') ? 'device' : field.allowed_scope_types[0] },
+    negation_behavior: { operation: 'unsupported' }, removal_behavior: { operation: 'unsupported' }, default_behavior: { operation: 'unknown' }, examples: [],
+  }
+}
+
 function MappingEditor({ block, fields, existing, onSaved }: { block: UnresolvedBlock; fields: CanonicalField[]; existing?: MappingVersion; onSaved: (mapping: MappingVersion) => void }) {
   const initialField = fields.find((field) => field.field_id === existing?.target_field_id) ?? fields.find((field) => block.candidate_field_ids.includes(field.field_id)) ?? fields[0]
   const existingMatch = existing?.structural_match
@@ -65,18 +78,32 @@ function MappingEditor({ block, fields, existing, onSaved }: { block: Unresolved
   const [command, setCommand] = useState(typeof existingMatch?.command === 'string' ? existingMatch.command : typeof block.occurrence.command === 'string' ? block.occurrence.command : '')
   const [parent, setParent] = useState(typeof existingMatch?.parent_command === 'string' ? existingMatch.parent_command : typeof block.occurrence.parent_command === 'string' ? block.occurrence.parent_command : '')
   const [literals, setLiterals] = useState('')
-  const [mappingKey, setMappingKey] = useState(existing?.mapping_key ?? `iosxe.${block.fingerprint.slice(0, 12)}`)
+  const [mappingKey, setMappingKey] = useState(existing?.mapping_key ?? `${block.profile_version_id?.startsWith('juniper.') ? 'junos' : 'mapping'}.${block.fingerprint.slice(0, 12)}`)
   const [title, setTitle] = useState(existing?.title ?? 'Reviewed unresolved syntax')
   const [description, setDescription] = useState(existing?.description ?? 'Administrator-authored bounded mapping for reviewed syntax.')
+  const isXml = existing?.structural_match?.operation === 'xml_path' || block.profile_version_id?.startsWith('juniper.')
+  const [advancedJson, setAdvancedJson] = useState(existing ? JSON.stringify(mappingDefinition(existing), null, 2) : isXml ? JSON.stringify(starterXmlDefinition(initialField, block.profile_version_id ?? 'juniper.junos.18@1.0.0', block), null, 2) : '')
+  const [advancedError, setAdvancedError] = useState<string | null>(null)
   const mutation = useMutation({
     mutationFn: () => {
       const field = fields.find((item) => item.field_id === fieldId) ?? initialField
-      const definition = buildDefinition(field, block.profile_version_id ?? 'cisco.ios_xe.17@1.0.0', command, parent, literals)
+      let definition: MappingDefinition
+      if (existing || isXml) {
+        try {
+          definition = JSON.parse(advancedJson) as MappingDefinition
+          setAdvancedError(null)
+        } catch {
+          setAdvancedError('Mapping definition must be valid JSON.')
+          throw new Error('Mapping definition must be valid JSON.')
+        }
+      } else {
+        definition = buildDefinition(field, block.profile_version_id ?? 'cisco.ios_xe.17@1.0.0', command, parent, literals)
+      }
       return existing ? updateMapping(existing, { title, description, definition }) : createMapping({ mapping_key: mappingKey, title, description, definition, unresolved_block_id: block.unresolved_block_id })
     },
     onSuccess: onSaved,
   })
-  return <form className="panel mapping-editor" onSubmit={(event) => { event.preventDefault(); mutation.mutate() }}><div className="section-title"><div><span className="eyebrow">Bounded declarative controls</span><h2>{existing ? 'Edit draft Mapping' : 'Create Mapping manually'}</h2></div></div><p className="quiet-state">No code, regex, shell, or executable expressions are accepted. The server validates every operation and canonical field.</p><div className="form-grid"><label className="field">Mapping key<input required maxLength={255} value={mappingKey} disabled={Boolean(existing)} onChange={(event) => setMappingKey(event.target.value)} /></label><label className="field">Canonical target field<select value={fieldId} onChange={(event) => setFieldId(event.target.value)}>{fields.map((field) => <option key={field.field_id} value={field.field_id}>{field.field_id}</option>)}</select></label><label className="field">Title<input required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="field">Command equality<input required maxLength={100} value={command} onChange={(event) => setCommand(event.target.value)} /></label><label className="field">Parent command <small>optional</small><input maxLength={100} value={parent} onChange={(event) => setParent(event.target.value)} /></label><label className="field">Leading literal arguments <small>space separated</small><input value={literals} onChange={(event) => setLiterals(event.target.value)} /></label><label className="field span-two">Description<textarea required maxLength={2048} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} /></label></div>{mutation.isError && <p className="error-message" role="alert">{errorMessage(mutation.error)}</p>}<div className="button-row"><button className="button-primary" disabled={mutation.isPending}>{mutation.isPending ? 'Saving...' : existing ? 'Save revised draft' : 'Create draft Mapping'}</button></div></form>
+  return <form className="panel mapping-editor" onSubmit={(event) => { event.preventDefault(); mutation.mutate() }}><div className="section-title"><div><span className="eyebrow">Bounded declarative controls</span><h2>{existing ? 'Edit draft Mapping' : 'Create Mapping manually'}</h2></div></div><p className="quiet-state">No code, regex, shell, or executable expressions are accepted. The server validates every operation and canonical field.</p><div className="form-grid"><label className="field">Mapping key<input required maxLength={255} value={mappingKey} disabled={Boolean(existing)} onChange={(event) => setMappingKey(event.target.value)} /></label><label className="field">Canonical target field<select value={fieldId} onChange={(event) => setFieldId(event.target.value)}>{fields.map((field) => <option key={field.field_id} value={field.field_id}>{field.field_id}</option>)}</select></label><label className="field">Title<input required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} /></label>{isXml ? <label className="field span-two">Full MappingDefinition JSON <small>lossless bounded XML-path editor; server remains authoritative</small><textarea required rows={18} value={advancedJson} onChange={(event) => setAdvancedJson(event.target.value)} /></label> : <><label className="field">Command equality<input required maxLength={100} value={command} onChange={(event) => setCommand(event.target.value)} /></label><label className="field">Parent command <small>optional</small><input maxLength={100} value={parent} onChange={(event) => setParent(event.target.value)} /></label><label className="field">Leading literal arguments <small>space separated</small><input value={literals} onChange={(event) => setLiterals(event.target.value)} /></label></>}<label className="field span-two">Description<textarea required maxLength={2048} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} /></label></div>{advancedError && <p className="error-message" role="alert">{advancedError}</p>}{mutation.isError && <p className="error-message" role="alert">{errorMessage(mutation.error)}</p>}<div className="button-row"><button className="button-primary" disabled={mutation.isPending}>{mutation.isPending ? 'Saving...' : existing ? 'Save revised draft' : 'Create draft Mapping'}</button></div></form>
 }
 
 function MappingWorkflow({ block, mappingId, fields }: { block: UnresolvedBlock; mappingId: string; fields: CanonicalField[] }) {

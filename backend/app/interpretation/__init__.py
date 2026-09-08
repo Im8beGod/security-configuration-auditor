@@ -14,6 +14,7 @@ from app.interpretation.models import (
 )
 from app.interpretation.service import (
     interpret_audit,
+    interpret_xml_structural_ir,
     interpret_structural_ir,
     load_active_published_knowledge_pack,
     list_audit_security_facts,
@@ -32,6 +33,7 @@ __all__ = [
     "InterpretationValidationError",
     "InterpretationWorkflowError",
     "interpret_audit",
+    "interpret_xml_structural_ir",
     "interpret_structural_ir",
     "load_active_published_knowledge_pack",
     "list_audit_security_facts",

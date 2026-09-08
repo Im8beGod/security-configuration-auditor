@@ -43,8 +43,44 @@ class ArgumentPattern(StrictModel):
         return self
 
 
+class XmlPathSegment(StrictModel):
+    local_name: str = Field(min_length=1, max_length=128)
+    namespace_uri: str | None = Field(default=None, max_length=512)
+    occurrence: Literal["exact", "any"] = "exact"
+    index: int = Field(default=1, ge=1, le=1024)
+
+    @model_validator(mode="after")
+    def safe_name(self) -> "XmlPathSegment":
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}", self.local_name):
+            raise ValueError("XML path segment is invalid")
+        if self.namespace_uri is not None and not self.namespace_uri.startswith(("http://", "https://", "urn:")):
+            raise ValueError("XML namespace URI is invalid")
+        return self
+
+
+class XmlPathMatch(StrictModel):
+    path: list[XmlPathSegment] = Field(min_length=1, max_length=16)
+    source: Literal["presence", "text", "attribute"] = "presence"
+    attribute: str | None = Field(default=None, max_length=128)
+    capture: str | None = None
+    value_type: Literal["string", "integer", "number", "boolean", "ip_address"] | None = None
+    start_mode: Literal["document_root"] = "document_root"
+
+    @model_validator(mode="after")
+    def valid_source(self) -> "XmlPathMatch":
+        if self.source == "attribute" and not self.attribute:
+            raise ValueError("XML attribute source requires an attribute")
+        if self.capture and not IDENTIFIER.fullmatch(self.capture):
+            raise ValueError("XML capture is invalid")
+        if self.source != "presence" and not self.capture:
+            raise ValueError("XML value source requires a capture")
+        if self.attribute and not IDENTIFIER.fullmatch(self.attribute):
+            raise ValueError("XML attribute is invalid")
+        return self
+
+
 class StructuralMatch(StrictModel):
-    operation: Literal["command_equality", "command_prefix"] = "command_equality"
+    operation: Literal["command_equality", "command_prefix", "xml_path"] = "command_equality"
     command: str = Field(min_length=1, max_length=100)
     arguments: list[ArgumentPattern] = Field(default_factory=list, max_length=32)
     minimum_arguments: int | None = Field(default=None, ge=0, le=64)
@@ -53,9 +89,16 @@ class StructuralMatch(StrictModel):
     ancestor_commands: list[str] = Field(default_factory=list, max_length=8)
     scope_type: Literal["device", "current_scope", "parent_scope", "management_plane", "vty_range", "interface", "interface_range", "vrf", "security_zone", "global"] | None = None
     negated: bool | None = None
+    xml_path: XmlPathMatch | None = None
 
     @model_validator(mode="after")
     def safe_matcher(self) -> "StructuralMatch":
+        if self.operation == "xml_path":
+            if self.xml_path is None:
+                raise ValueError("xml_path operation requires an XML path")
+            return self
+        if self.xml_path is not None:
+            raise ValueError("XML path is only valid for xml_path operation")
         tokens = [self.command, *self.ancestor_commands]
         if self.parent_command:
             tokens.append(self.parent_command)
@@ -95,6 +138,14 @@ class UnitConversion(StrictModel):
 
 class ScopeResolution(StrictModel):
     strategy: Literal["device", "current_scope", "parent_scope", "management_plane", "vty_range", "interface", "interface_range", "vrf", "security_zone", "global"]
+    xml_unsupported_qualifier_paths: list[list[str]] = Field(default_factory=list, max_length=8)
+
+    @field_validator("xml_unsupported_qualifier_paths")
+    @classmethod
+    def bounded_xml_qualifiers(cls, paths: list[list[str]]) -> list[list[str]]:
+        if any(not path or len(path) > 8 or any(not _safe(segment) for segment in path) for path in paths):
+            raise ValueError("XML qualifier paths are malformed")
+        return paths
 
 
 class ExplicitBehavior(StrictModel):
@@ -158,6 +209,8 @@ class MappingDefinition(StrictModel):
 
 def matches(definition: MappingDefinition, node: ValidationNode) -> tuple[bool, dict[str, Any]]:
     match = definition.structural_match
+    if match.operation == "xml_path":
+        return False, {}
     command_matches = node.command == match.command if match.operation == "command_equality" else node.command.startswith(match.command)
     if not command_matches or match.negated is not None and node.negated != match.negated:
         return False, {}
@@ -191,6 +244,72 @@ def matches(definition: MappingDefinition, node: ValidationNode) -> tuple[bool, 
                 return False, {}
         index += 1
     return True, captures
+
+
+def matches_xml(definition: MappingDefinition, ir: Any) -> tuple[tuple[Any, dict[str, Any]], ...]:
+    """Return bounded XML node matches without XPath, regex, or descendant wildcards."""
+    match = definition.structural_match
+    if match.operation != "xml_path" or match.xml_path is None:
+        return ()
+    result: list[tuple[Any, dict[str, Any]]] = []
+    expected = match.xml_path.path
+    for node in ir.nodes:
+        if len(node.path) != len(expected):
+            continue
+        captures: dict[str, Any] = {}
+        valid = True
+        for actual, segment in zip(node.path, expected):
+            tag = actual.rsplit("[", 1)[0]
+            occurrence = int(actual.rsplit("[", 1)[1][:-1])
+            namespace, local = _xml_name(tag)
+            if local != segment.local_name or (segment.namespace_uri is not None and namespace != segment.namespace_uri) or (segment.occurrence == "exact" and occurrence != segment.index):
+                valid = False
+                break
+        if not valid:
+            continue
+        source = match.xml_path
+        if source.source == "text":
+            raw = node.text
+        elif source.source == "attribute":
+            raw = dict(node.attributes).get(source.attribute or "")
+        else:
+            raw = True
+        if raw is None:
+            continue
+        if source.capture:
+            try:
+                captures[source.capture] = _typed(str(raw), source.value_type or "string")
+            except ValueError:
+                continue
+        result.append((node, captures))
+    return tuple(result)
+
+
+def xml_match_has_unsupported_qualifier(definition: MappingDefinition, ir: Any, node: Any) -> bool:
+    """Fail closed when a matched XML value carries a declared unsupported scope qualifier."""
+    paths = definition.scope_resolution.xml_unsupported_qualifier_paths
+    if not paths or node.parent_id is None:
+        return False
+    nodes = {item.node_id: item for item in ir.nodes}
+    children: dict[str, list[Any]] = {}
+    for item in ir.nodes:
+        if item.parent_id is not None:
+            children.setdefault(item.parent_id, []).append(item)
+    frontier = [nodes.get(node.parent_id)]
+    for path in paths:
+        current = [item for item in frontier if item is not None]
+        for segment in path:
+            current = [child for item in current for child in children.get(item.node_id, ()) if _xml_name(child.tag)[1] == segment]
+        if current:
+            return True
+    return False
+
+
+def _xml_name(tag: str) -> tuple[str | None, str]:
+    if tag.startswith("{") and "}" in tag:
+        namespace, local = tag[1:].split("}", 1)
+        return namespace, local
+    return None, tag
 
 
 def extract(definition: MappingDefinition, captures: dict[str, Any]) -> Any:

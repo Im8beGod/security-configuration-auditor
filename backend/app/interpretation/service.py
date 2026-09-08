@@ -60,6 +60,7 @@ from app.knowledge_packs.fortios_7 import (
     FORTIOS_7_KNOWLEDGE_PACK_V1,
 )
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
+from app.parsing.readers.xml_tree import XmlStructuralIR, XmlNode
 from app.parsing.exceptions import (
     ArtifactNotParseableError,
     ParsingInfrastructureError,
@@ -69,13 +70,14 @@ from app.profile_resolution import PROFILE_REGISTRY
 from app.security_model import (
     EvidenceRef,
     FieldRegistryValidationError,
+    ScopeRef,
     SecurityFactDraft,
     TypedValue,
     TypedValueType,
     get_field,
     validate_field_value_scope,
 )
-from app.training.dsl import MappingDefinition, ValidationNode, extract as extract_training, matches as matches_training
+from app.training.dsl import MappingDefinition, ValidationNode, extract as extract_training, matches as matches_training, matches_xml, xml_match_has_unsupported_qualifier
 
 
 KNOWLEDGE_PACKS = {
@@ -92,6 +94,11 @@ KNOWLEDGE_PACKS_BY_VERSION = {
 }
 
 
+def _junos_pack():
+    from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK
+    return JUNIPER_JUNOS_18_KNOWLEDGE_PACK
+
+
 def _fortios_pack():
     return FORTIOS_7_KNOWLEDGE_PACK
 
@@ -99,6 +106,8 @@ def _fortios_pack():
 def load_validated_knowledge_pack(profile_version_id: str) -> KnowledgePack:
     profile = PROFILE_REGISTRY.get(profile_version_id)
     pack = KNOWLEDGE_PACKS.get(profile_version_id)
+    if pack is None and profile_version_id == "juniper.junos.18@1.0.0":
+        pack = _junos_pack()
     if pack is None and profile_version_id == "fortinet.fortios.7@1.0.0":
         pack = _fortios_pack()
     if (
@@ -128,6 +137,8 @@ def load_validated_knowledge_pack_by_version(
 ) -> KnowledgePack:
     """Load an immutable historical pack by its exact pinned identity."""
     pack = KNOWLEDGE_PACKS_BY_VERSION.get(knowledge_pack_version_id)
+    if pack is None and knowledge_pack_version_id == UUID("b3040000-0000-5000-8000-000000000018"):
+        pack = _junos_pack()
     if pack is None:
         raise InterpretationValidationError(
             "knowledge_pack_unavailable", "No compatible knowledge pack is available"
@@ -381,6 +392,70 @@ def interpret_structural_ir(
     )
 
 
+def interpret_xml_structural_ir(
+    ir: XmlStructuralIR,
+    context: InterpretationContext,
+    *,
+    profile_version_id: str,
+    knowledge_pack: KnowledgePack | None = None,
+) -> InterpretationResult:
+    """Interpret XML using the same declarative mapping contract as CLI evidence."""
+    profile = PROFILE_REGISTRY.get(profile_version_id)
+    if profile is None or ir.reader_id != profile.structural_reader_name:
+        raise InterpretationValidationError("profile_ir_incompatible", "Resolved profile is incompatible with XML IR")
+    if ir.source.snapshot_id != context.snapshot_id or any(node.source.artifact_id != ir.source.artifact_id for node in ir.nodes):
+        raise InterpretationValidationError("ir_provenance_invalid", "XML IR provenance is inconsistent")
+    pack = knowledge_pack or load_validated_knowledge_pack(profile_version_id)
+    validate_knowledge_pack(pack, expected_profile_id=profile.profile_id, expected_profile_version_id=profile.profile_version_id, allowed_extractors=frozenset(EXTRACTORS), scope_resolver_types=SCOPE_RESOLVER_TYPES)
+    facts: list[SecurityFactDraft] = []
+    diagnostics: list[InterpretationDiagnostic] = []
+    matched: set[str] = set()
+    for mapping in pack.mappings:
+        definition_payload = mapping.training_definition
+        if not definition_payload or definition_payload.get("structural_match", {}).get("operation") != "xml_path":
+            continue
+        definition = MappingDefinition.model_validate(definition_payload)
+        for node, captures in matches_xml(definition, ir):
+            if xml_match_has_unsupported_qualifier(definition, ir, node):
+                diagnostics.append(InterpretationDiagnostic("xml_scope_unsupported", node.node_id, mapping.mapping_id))
+                continue
+            try:
+                value = extract_training(definition, captures)
+                typed = TypedValue(TypedValueType(definition.value_extraction.output_type), value)
+                scope = ScopeRef(type=definition.scope_resolution.strategy, key="device", attributes={})
+                validate_field_value_scope(definition.target_field_id, typed, scope)
+            except (KeyError, TypeError, ValueError, FieldRegistryValidationError):
+                diagnostics.append(InterpretationDiagnostic("xml_mapping_output_invalid", node.node_id, mapping.mapping_id))
+                continue
+            facts.append(_build_xml_fact(context=context, ir=ir, pack=pack, mapping=mapping, value=typed, scope=scope, node=node))
+            matched.add(node.node_id)
+    statements = len(ir.nodes)
+    return InterpretationResult(
+        facts=tuple(facts), diagnostics=tuple(diagnostics),
+        metrics=InterpretationMetrics(statements, len(matched), len(facts), len(facts), statements - len(matched), len(diagnostics)),
+        unresolved_node_ids=tuple(node.node_id for node in ir.nodes if node.node_id not in matched),
+    )
+
+
+def _build_xml_fact(*, context: InterpretationContext, ir: XmlStructuralIR, pack: KnowledgePack, mapping: DeclarativeMapping, value: TypedValue, scope: ScopeRef, node: XmlNode) -> SecurityFactDraft:
+    evidence = EvidenceRef(
+        artifact_id=node.source.artifact_id, start_line=node.order, end_line=node.order,
+        source_path=node.source.source_label, ir_node_id=node.node_id,
+        evidence_type=ArtifactEvidenceType.CONFIGURATION,
+    )
+    identity = json.dumps({"audit_id": str(context.audit_id), "mapping_version_id": str(mapping.mapping_version_id), "source_ir_node_ids": (node.node_id,), "field_id": mapping.field_id, "scope": scope.to_dict(), "entity": None, "value": value.to_dict()}, sort_keys=True, separators=(",", ":"))
+    return SecurityFactDraft(
+        fact_id=uuid5(pack.knowledge_pack_version_id, identity), audit_id=context.audit_id,
+        device_id=context.device_id, snapshot_id=context.snapshot_id, field_id=mapping.field_id,
+        value=value, entity=None, scope=scope, state=FactState.EXPLICIT,
+        evidence_refs=(evidence,), source_ir_node_ids=(node.node_id,),
+        extraction_method=InterpretationMethod.DECLARATIVE_MAPPING, mapping_id=mapping.mapping_id,
+        mapping_version_id=mapping.mapping_version_id, knowledge_pack_version_id=pack.knowledge_pack_version_id,
+        validation_status=FactValidationStatus.VALIDATED, dependencies=(),
+        interpretation_confidence=InterpretationConfidence.HIGH,
+    )
+
+
 def interpret_audit(
     db: Session,
     storage: ArtifactStorage,
@@ -443,16 +518,19 @@ def interpret_audit(
                 "knowledge_pack_version_conflict", "Audit knowledge-pack version is incompatible"
             )
     artifacts = validate_snapshot_evidence(db, snapshot)
-    configuration_artifacts = sorted(
+    profile_manifest = PROFILE_REGISTRY.get(profile_version_id)
+    evidence_artifacts = sorted(
         (
             artifact for artifact in artifacts
-            if artifact.evidence_type == ArtifactEvidenceType.CONFIGURATION
+            if profile_manifest is not None
+            and artifact.evidence_type in profile_manifest.structural_evidence_types
         ),
         key=lambda artifact: str(artifact.artifact_id),
     )
-    if not configuration_artifacts:
+    if not evidence_artifacts:
         raise InterpretationValidationError(
-            "configuration_evidence_missing", "Snapshot has no configuration evidence"
+            "structural_evidence_missing",
+            "Snapshot has no evidence compatible with the selected profile",
         )
 
     expected_profile_resolution = dict(audit.profile_resolution)
@@ -464,13 +542,13 @@ def interpret_audit(
         device_id=audit.device_id,
         snapshot_id=audit.snapshot_id,
     )
-    for artifact in configuration_artifacts:
+    for artifact in evidence_artifacts:
         db.expunge(artifact)
     db.rollback()
 
-    parsed_irs: list[StructuralIR] = []
+    parsed_irs: list[StructuralIR | XmlStructuralIR] = []
     artifact_diagnostics: list[ArtifactInterpretationDiagnostic] = []
-    for artifact in configuration_artifacts:
+    for artifact in evidence_artifacts:
         try:
             parsed_irs.append(parse_artifact(
                 storage,
@@ -494,12 +572,10 @@ def interpret_audit(
     artifact_results: list[InterpretationResult] = []
     drafts: list[SecurityFactDraft] = []
     for ir in parsed_irs:
-        result = interpret_structural_ir(
-            ir,
-            context,
-            profile_version_id=profile_version_id,
-            knowledge_pack=pack,
-        )
+        if isinstance(ir, XmlStructuralIR):
+            result = interpret_xml_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
+        else:
+            result = interpret_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
         artifact_results.append(result)
         drafts.extend(result.facts)
 
@@ -822,7 +898,7 @@ def _persist_unresolved_blocks(
     context: InterpretationContext,
     profile_id: str,
     profile_version_id: str,
-    parsed_irs: list[StructuralIR],
+    parsed_irs: list[StructuralIR | XmlStructuralIR],
     results: list[InterpretationResult],
 ) -> None:
     for ir, result in zip(parsed_irs, results, strict=True):
@@ -831,7 +907,11 @@ def _persist_unresolved_blocks(
         for node_id in result.unresolved_node_ids:
             node = nodes[node_id]
             parent = nodes.get(node.parent_id) if node.parent_id else None
-            identity = f"{context.audit_id}:{node.artifact_id}:{node.node_id}"
+            artifact_id = node.artifact_id if isinstance(ir, StructuralIR) else node.source.artifact_id
+            source_label = node.source_label if isinstance(ir, StructuralIR) else node.source.source_label
+            start_line = node.source_start if isinstance(ir, StructuralIR) else node.order
+            end_line = node.source_end if isinstance(ir, StructuralIR) else node.order
+            identity = f"{context.audit_id}:{artifact_id}:{node.node_id}"
             fingerprint = hashlib.sha256(identity.encode()).hexdigest()
             exists = db.scalar(select(UnresolvedBlock.unresolved_block_id).where(
                 UnresolvedBlock.audit_id == context.audit_id,
@@ -841,7 +921,16 @@ def _persist_unresolved_blocks(
                 continue
             nearby = sorted(ir.nodes, key=lambda item: item.order)
             position = next(index for index, item in enumerate(nearby) if item.node_id == node.node_id)
-            context_text = "\n".join(item.raw_text for item in nearby[max(0, position - 2):position + 3])[:4096]
+            context_text = "\n".join(
+                (item.raw_text if isinstance(ir, StructuralIR) else f"<{item.tag}>{item.text or ''}")
+                for item in nearby[max(0, position - 2):position + 3]
+            )[:4096]
+            if isinstance(ir, StructuralIR):
+                raw_text = node.raw_text
+                occurrence = {"artifact_id": str(node.artifact_id), "command": node.command, "arguments": list(node.arguments), "parent_command": parent.command if parent else None, "ancestor_commands": list(node.context_path), "negated": node.negated, "order": node.order}
+            else:
+                raw_text = f"<{node.tag}>{node.text or ''}"[:2048]
+                occurrence = {"artifact_id": str(artifact_id), "xml_path": list(node.path), "tag": node.tag, "attributes": dict(node.attributes), "text": node.text, "order": node.order}
             db.add(UnresolvedBlock(
                 organization_id=organization_id,
                 audit_id=context.audit_id,
@@ -851,28 +940,20 @@ def _persist_unresolved_blocks(
                 profile_version_id=profile_version_id,
                 source_ir_node_ids=[node.node_id],
                 evidence_refs=[{
-                    "artifact_id": str(node.artifact_id),
-                    "start_line": node.source_start,
-                    "end_line": node.source_end,
-                    "source_path": node.source_label,
+                    "artifact_id": str(artifact_id),
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "source_path": source_label,
                     "ir_node_id": node.node_id,
                     "evidence_type": ArtifactEvidenceType.CONFIGURATION.value,
                 }],
-                raw_text=node.raw_text[:2048],
+                raw_text=raw_text,
                 surrounding_context=context_text,
                 unknown_reason=diagnostics.get(node.node_id, "unmapped_syntax"),
                 candidate_field_ids=[],
                 affected_rule_ids=[],
                 fingerprint=fingerprint,
-                occurrence={
-                    "artifact_id": str(node.artifact_id),
-                    "command": node.command,
-                    "arguments": list(node.arguments),
-                    "parent_command": parent.command if parent else None,
-                    "ancestor_commands": list(node.context_path),
-                    "negated": node.negated,
-                    "order": node.order,
-                },
+                occurrence=occurrence,
             ))
 
 

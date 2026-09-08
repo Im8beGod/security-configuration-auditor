@@ -14,7 +14,7 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, compatible_manifests
+from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, PROFILE_REGISTRY, ProfileManifest, compatible_manifests
 
 
 MAX_LINE_CHARACTERS = 4096
@@ -222,6 +222,8 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
             cisco_syntax_signals.append(signal)
             _append_signal(signals, signal)
 
+    _extract_manifest_xml_identity(evidence, identities, models, serials, signals)
+
     return _resolve_candidates(
         identities=identities,
         models=models,
@@ -229,6 +231,79 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
         cisco_syntax_signals=cisco_syntax_signals,
         signals=tuple(signals),
         unavailable_count=len(evidence.issues),
+    )
+
+
+def _extract_manifest_xml_identity(
+    evidence: SnapshotEvidence,
+    identities: list[_Identity],
+    models: list[_Hardware],
+    serials: list[_Hardware],
+    signals: list[EvidenceSignal],
+) -> None:
+    # Keep XML parsing imports lazy because profile resolution is imported while
+    # the database model package is still initializing.
+    from app.parsing.models import ArtifactProvenance
+    from app.parsing.service import parse_xml_text
+
+    """Apply only manifest-declared bounded selectors to XML evidence."""
+    xml_manifests = tuple(
+        item for item in PROFILE_REGISTRY.values()
+        if item.structural_reader_name == "xml_tree.v1" and item.xml_identity_selectors
+    )
+    if not xml_manifests:
+        return
+    for document in evidence.documents:
+        if "<" not in document.text:
+            continue
+        source = ArtifactProvenance(
+            artifact_id=document.artifact_id, organization_id=document.organization_id,
+            snapshot_id=document.snapshot_id, source_label=document.original_filename,
+            sha256=document.sha256, source_metadata=document.source_metadata,
+        )
+        try:
+            ir = parse_xml_text(document.text, source=source, input_truncated=document.truncated)
+        except (ValueError, TypeError):
+            continue
+        for manifest in xml_manifests:
+            values = {
+                selector.field: (selector, node, value)
+                for selector in manifest.xml_identity_selectors
+                for node in ir.nodes
+                if (value := selector.matches(node.path, attributes=node.attributes, text=node.text)) is not None
+            }
+            version_data = values.get("os_version")
+            if version_data is None:
+                continue
+            version_selector, version_node, version = version_data
+            version_signal = _xml_signal(document, version_selector.field, version_selector, version_node, manifest)
+            identities.append(_Identity(manifest.vendor, manifest.os, version, version_signal))
+            _append_signal(signals, version_signal)
+            for field, collection in (("hostname", values), ("model", values), ("serial_number", values)):
+                item = collection.get(field)
+                if item is None:
+                    continue
+                selector, node, value = item
+                signal = _xml_signal(document, field, selector, node, manifest)
+                _append_signal(signals, signal)
+                if field == "model":
+                    models.append(_Hardware(value, signal))
+                elif field == "serial_number":
+                    serials.append(_Hardware(value, signal))
+
+
+def _xml_signal(
+    document: EvidenceDocument,
+    field: str,
+    selector,
+    node,
+    manifest: ProfileManifest,
+) -> EvidenceSignal:
+    return EvidenceSignal(
+        artifact_id=document.artifact_id, evidence_type=document.evidence_type,
+        line_number=None, category="xml_identity", signal_id=f"{manifest.profile_id}:{field}",
+        strength=SignalStrength.STRONG, extracted_fields=(field,),
+        source_label=document.original_filename, source_path=node.path,
     )
 
 
@@ -350,6 +425,26 @@ def _resolve_candidates(
                 reasons=("Detected FortiOS version is outside the supported 7.x profile",),
             )
 
+        if version is None:
+            return _result(
+                vendor=vendor, product_family=product_family, os_name=os_name,
+                model=model, serial_number=serial_number, device_class=device_class,
+                signals=signals, confidence=ResolutionConfidence.MEDIUM,
+                status=ResolutionStatus.PARTIALLY_RESOLVED,
+                reasons=("Profile applicability requires an explicit software version",),
+            )
+        candidates = compatible_manifests(vendor, os_name, version)
+        if len(candidates) > 1:
+            return _result(vendor=vendor, product_family=product_family, os_name=os_name, os_version=version,
+                           model=model, serial_number=serial_number, device_class=device_class, signals=signals,
+                           confidence=ResolutionConfidence.UNRESOLVED, status=ResolutionStatus.AMBIGUOUS,
+                           reasons=("Multiple compatible profile manifests were detected",))
+        if candidates:
+            selected = candidates[0]
+            return _result(vendor=vendor, product_family=product_family, os_name=os_name, os_version=version,
+                           model=model, serial_number=serial_number, device_class=device_class,
+                           selected_profile_id=selected.profile_id, selected_profile_version_id=selected.profile_version_id,
+                           signals=signals, confidence=explicit_confidence, status=ResolutionStatus.RESOLVED)
         return _result(
             vendor=vendor, os_name=os_name, os_version=version,
             signals=signals, confidence=explicit_confidence,

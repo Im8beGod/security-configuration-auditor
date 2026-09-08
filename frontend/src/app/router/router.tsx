@@ -16,6 +16,7 @@ import { FindingDetailPage } from '../../features/findings/FindingDetailPage'
 import { ReportsPage } from '../../features/reports/ReportsPage'
 import { TrainingPage } from '../../features/training/TrainingPage'
 import { UnresolvedDetailPage } from '../../features/training/UnresolvedDetailPage'
+import { MappingEditorPage } from '../../features/training/MappingEditorPage'
 import { UploadsPage } from '../../features/uploads/UploadsPage'
 import { NotFoundPage } from '../../shared/components/NotFoundPage'
 
@@ -42,6 +43,8 @@ export const router = createBrowserRouter([
             element: <RequireRole allowedRoles={TRAINING_ROLES} />,
             children: [
               { path: '/training', element: <TrainingPage /> },
+              { path: '/training/mappings/new', element: <MappingEditorPage /> },
+              { path: '/training/mappings/:mappingId', element: <MappingEditorPage /> },
               { path: '/training/unresolved/:unresolvedId', element: <UnresolvedDetailPage /> },
             ],
           },

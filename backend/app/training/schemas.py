@@ -91,6 +91,10 @@ class ValidationRequestResponse(BaseModel):
     status: ValidationRunStatus
 
 
+class MappingValidationRequest(BaseModel):
+    evidence_artifact_id: UUID | None = None
+
+
 class PublicationResponse(BaseModel):
     mapping: MappingResponse
     knowledge_pack_version_id: UUID

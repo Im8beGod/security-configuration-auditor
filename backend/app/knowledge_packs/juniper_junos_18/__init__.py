@@ -1,0 +1,3 @@
+from app.knowledge_packs.juniper_junos_18.manifest import JUNIPER_JUNOS_18_KNOWLEDGE_PACK
+
+__all__ = ["JUNIPER_JUNOS_18_KNOWLEDGE_PACK"]

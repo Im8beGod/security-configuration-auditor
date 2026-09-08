@@ -26,6 +26,7 @@ from app.db.models import (
     KnowledgePackRecord,
     KnowledgePackVersionRecord,
     MappingVersion,
+    MappingStatus,
 )
 from app.ingestion.storage import ArtifactStorage
 from app.interpretation.exceptions import (
@@ -184,6 +185,61 @@ def load_published_knowledge_pack(
             expected_profile_version_id=profile_version_id, allowed_extractors=frozenset(EXTRACTORS), scope_resolver_types=SCOPE_RESOLVER_TYPES)
     except ValueError:
         raise InterpretationValidationError("knowledge_pack_invalid", "Knowledge pack validation failed") from None
+
+
+def load_active_published_knowledge_pack(
+    db: Session, organization_id: UUID, profile_version_id: str
+) -> KnowledgePack | None:
+    """Load the newest compatible published pack for a fresh audit."""
+    profile = PROFILE_REGISTRY.get(profile_version_id)
+    if profile is None:
+        return None
+    versions = list(db.scalars(select(KnowledgePackVersionRecord).where(
+        KnowledgePackVersionRecord.organization_id == organization_id,
+    ).order_by(
+        KnowledgePackVersionRecord.published_at.desc(),
+        KnowledgePackVersionRecord.version.desc(),
+        KnowledgePackVersionRecord.knowledge_pack_version_id.desc(),
+    )))
+    latest_by_pack: dict[UUID, KnowledgePackVersionRecord] = {}
+    for version in versions:
+        latest_by_pack.setdefault(version.knowledge_pack_id, version)
+    candidates: list[KnowledgePackVersionRecord] = []
+    for version in latest_by_pack.values():
+        if not version.mapping_version_ids:
+            continue
+        try:
+            mapping_ids = [UUID(value) for value in version.mapping_version_ids]
+        except (TypeError, ValueError):
+            continue
+        mappings = list(db.scalars(select(MappingVersion).where(
+            MappingVersion.mapping_version_id.in_(mapping_ids),
+            MappingVersion.organization_id == organization_id,
+        )))
+        if len(mappings) != len(mapping_ids) or any(
+            mapping.status != MappingStatus.PUBLISHED
+            or mapping.approved_by is None
+            or mapping.published_at is None
+            or profile_version_id not in mapping.profile_applicability.get("profile_version_ids", [])
+            for mapping in mappings
+        ):
+            continue
+        candidates.append(version)
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        return None
+    selected = max(
+        candidates,
+        key=lambda item: (
+            item.published_at,
+            item.version,
+            str(item.knowledge_pack_version_id),
+        ),
+    )
+    return load_published_knowledge_pack(
+        db, organization_id, selected.knowledge_pack_version_id, profile_version_id
+    )
 
 
 def _training_mapping(row: MappingVersion, profile_version_id: str) -> DeclarativeMapping:

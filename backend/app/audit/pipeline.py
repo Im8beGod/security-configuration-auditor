@@ -23,6 +23,7 @@ from app.ingestion.storage import ArtifactStorage
 from app.interpretation import (
     AuditInterpretationResult,
     interpret_audit,
+    load_active_published_knowledge_pack,
     load_validated_knowledge_pack,
 )
 from app.interpretation.service import load_published_knowledge_pack
@@ -251,7 +252,11 @@ class AuditPipelineCoordinator:
                 raise AuditNotFoundError("audit_not_found", "Audit not found")
             pinned = audit.version_refs.get("knowledge_pack_version_id")
         if pinned is None:
-            return load_validated_knowledge_pack(profile_version_id)
+            with self._factory() as db:
+                published = load_active_published_knowledge_pack(
+                    db, organization_id, profile_version_id
+                )
+            return published or load_validated_knowledge_pack(profile_version_id)
         try:
             with self._factory() as db:
                 pack = load_published_knowledge_pack(db, organization_id, UUID(pinned), profile_version_id)

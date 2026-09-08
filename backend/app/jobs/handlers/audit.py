@@ -50,13 +50,17 @@ class AuditJobHandler:
             organization_id = audit_identity.organization_id
 
             if audit_identity and db.scalar(select(Audit.status).where(Audit.audit_id == audit_id)) in {
-                AuditStatus.COMPLETED, AuditStatus.COMPLETED_WITH_UNKNOWNS, AuditStatus.COMPLETED_WITH_ERRORS
+                AuditStatus.COMPLETED, AuditStatus.COMPLETED_WITH_UNKNOWNS,
+                AuditStatus.COMPLETED_WITH_ERRORS, AuditStatus.FAILED
             }:
                 return
 
+        coordinator = AuditPipelineCoordinator(self.factory, self.storage)
         try:
-            AuditPipelineCoordinator(self.factory, self.storage).run(
-                audit_id, organization_id
-            )
+            coordinator.run(audit_id, organization_id)
         except (AuditWorkflowError, InterpretationWorkflowError, EffectiveStateError, ComplianceError):
+            try:
+                coordinator.mark_failed(audit_id, organization_id)
+            except AuditWorkflowError:
+                pass
             raise JobError("Audit pipeline execution failed") from None

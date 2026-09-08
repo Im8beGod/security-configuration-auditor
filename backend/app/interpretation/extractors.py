@@ -85,6 +85,14 @@ def extract_fortios_port_enabled(node: ConfigNode) -> ExtractionOutcome:
     ))
 
 
+def extract_fortios_allowaccess_ssh(node: ConfigNode) -> ExtractionOutcome:
+    return _extract_fortios_allowaccess(node, "ssh")
+
+
+def extract_fortios_allowaccess_telnet(node: ConfigNode) -> ExtractionOutcome:
+    return _extract_fortios_allowaccess(node, "telnet")
+
+
 def extract_fortios_timeout(node: ConfigNode) -> ExtractionOutcome:
     if len(node.arguments) != 2 or node.arguments[0].lower() != "admintimeout" or not INTEGER_PATTERN.fullmatch(node.arguments[1]):
         return ExtractionOutcome(None, "invalid_fortios_timeout")
@@ -114,6 +122,26 @@ def _extract_transport_protocol(node: ConfigNode, protocol: str) -> ExtractionOu
         value = True
     else:
         return ExtractionOutcome(None, "unsupported_transport_input")
+    return ExtractionOutcome(TypedValue(
+        type=TypedValueType.BOOLEAN,
+        value=value,
+        original_value=" ".join(node.arguments),
+    ))
+
+
+def _extract_fortios_allowaccess(node: ConfigNode, protocol: str) -> ExtractionOutcome:
+    valid_tokens = {
+        "http", "https", "ping", "snmp", "ssh", "telnet", "fgfm", "ftm",
+    }
+    if len(node.arguments) < 2 or node.arguments[0].lower() != "allowaccess":
+        return ExtractionOutcome(None, "invalid_fortios_allowaccess")
+    tokens = tuple(item.lower() for item in node.arguments[1:])
+    if any(token not in valid_tokens and token != "none" for token in tokens):
+        return ExtractionOutcome(None, "invalid_fortios_allowaccess")
+    if tokens == ("none",):
+        value = False
+    else:
+        value = protocol in tokens
     return ExtractionOutcome(TypedValue(
         type=TypedValueType.BOOLEAN,
         value=value,
@@ -153,5 +181,7 @@ EXTRACTORS = {
     "ntp_server": extract_ntp_server,
     "fortios_server": extract_fortios_server,
     "fortios_port_enabled": extract_fortios_port_enabled,
+    "fortios_allowaccess_ssh": extract_fortios_allowaccess_ssh,
+    "fortios_allowaccess_telnet": extract_fortios_allowaccess_telnet,
     "fortios_timeout": extract_fortios_timeout,
 }

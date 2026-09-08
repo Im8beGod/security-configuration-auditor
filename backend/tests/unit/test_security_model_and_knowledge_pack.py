@@ -21,6 +21,7 @@ from app.interpretation.scopes import SCOPE_RESOLVER_TYPES
 from app.interpretation.service import load_validated_knowledge_pack
 from app.interpretation.service import load_validated_knowledge_pack_by_version
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
+from app.knowledge_packs.fortios_7 import FORTIOS_7_KNOWLEDGE_PACK, FORTIOS_7_KNOWLEDGE_PACK_V1
 from app.security_model import (
     FIELD_REGISTRY,
     FieldRegistryValidationError,
@@ -114,10 +115,19 @@ def test_immutable_knowledge_pack_versions_remain_independently_loadable():
     current = load_validated_knowledge_pack_by_version(
         UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
     )
+    fortios_legacy = load_validated_knowledge_pack_by_version(
+        FORTIOS_7_KNOWLEDGE_PACK_V1.knowledge_pack_version_id
+    )
+    fortios_current = load_validated_knowledge_pack_by_version(
+        FORTIOS_7_KNOWLEDGE_PACK.knowledge_pack_version_id
+    )
     assert legacy.version == "1.0.0"
     assert current.version == "1.1.0"
     assert legacy.mappings[0].mapping_version_id == current.mappings[0].mapping_version_id
     assert current.mappings[0].reset_mapping_version_id == UUID("e42c0eb2-1d5d-584a-b463-8ee80574a35c")
+    assert fortios_legacy.version == "1.0.0"
+    assert fortios_current.version == "1.1.0"
+    assert fortios_legacy.mappings[0].mapping_version_id != fortios_current.mappings[0].mapping_version_id
 
 
 @pytest.mark.parametrize(

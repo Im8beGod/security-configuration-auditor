@@ -93,7 +93,7 @@ FORTIOS_7 = ProfileManifest(
     device_classes=frozenset({DeviceClass.FIREWALL}),
     accepted_evidence_types=frozenset(ArtifactEvidenceType),
     structural_reader_name="fortios_cli.v1",
-    knowledge_pack_name="fortios_7@1.0.0",
+    knowledge_pack_name="fortios_7@1.1.0",
     capabilities=frozenset({
         "profile_detection", "structural_parsing", "semantic_interpretation",
         "effective_state_resolution", "deterministic_compliance",

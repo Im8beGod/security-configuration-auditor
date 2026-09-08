@@ -66,6 +66,7 @@ class AuditPipelineCoordinator:
             resolution.resolution_status != ResolutionStatus.RESOLVED
             or resolution.selected_profile_version_id is None
         ):
+            self._finalize_failure(audit_id, organization_id, stage=AuditProcessingStage.IDENTIFYING)
             return AuditPipelineResult(resolution, None, None, None, tuple(stages))
 
         pack = self._load_audit_pack(
@@ -207,6 +208,37 @@ class AuditPipelineCoordinator:
             audit.status = terminal
             audit.completed_at = utc_now()
             self._commit(db, "audit_finalization_failed")
+
+    def _finalize_failure(
+        self,
+        audit_id: UUID,
+        organization_id: UUID,
+        *,
+        stage: AuditProcessingStage | None = None,
+    ) -> None:
+        """Persist a truthful terminal failure when the profile cannot be processed."""
+        with self._factory() as db:
+            audit = db.scalar(select(Audit).where(
+                Audit.audit_id == audit_id, Audit.organization_id == organization_id
+            ).with_for_update())
+            if audit is None:
+                raise AuditNotFoundError("audit_not_found", "Audit not found")
+            if audit.status is not AuditStatus.PROCESSING:
+                raise AuditConflictError("audit_not_processing", "Audit is not processing")
+            if audit.completed_at is None:
+                audit.processing_stage = stage or audit.processing_stage or AuditProcessingStage.IDENTIFYING
+                audit.status = AuditStatus.FAILED
+                audit.completed_at = utc_now()
+                self._commit(db, "audit_finalization_failed")
+
+    def mark_failed(self, audit_id: UUID, organization_id: UUID) -> None:
+        """Expose a bounded failure terminalizer for controlled handler exceptions."""
+        with self._factory() as db:
+            audit = db.scalar(select(Audit).where(
+                Audit.audit_id == audit_id, Audit.organization_id == organization_id
+            ))
+            stage = audit.processing_stage if audit is not None else None
+        self._finalize_failure(audit_id, organization_id, stage=stage)
 
     def _load_audit_pack(
         self, audit_id: UUID, organization_id: UUID, profile_version_id: str

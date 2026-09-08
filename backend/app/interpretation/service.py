@@ -54,6 +54,10 @@ from app.knowledge_packs.cisco_iosxe_17 import (
     CISCO_IOS_XE_17_KNOWLEDGE_PACK,
     CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1,
 )
+from app.knowledge_packs.fortios_7 import (
+    FORTIOS_7_KNOWLEDGE_PACK,
+    FORTIOS_7_KNOWLEDGE_PACK_V1,
+)
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
 from app.parsing.exceptions import (
     ArtifactNotParseableError,
@@ -78,12 +82,16 @@ KNOWLEDGE_PACKS = {
 }
 KNOWLEDGE_PACKS_BY_VERSION = {
     pack.knowledge_pack_version_id: pack
-    for pack in (CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1, CISCO_IOS_XE_17_KNOWLEDGE_PACK)
+    for pack in (
+        CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1,
+        CISCO_IOS_XE_17_KNOWLEDGE_PACK,
+        FORTIOS_7_KNOWLEDGE_PACK_V1,
+        FORTIOS_7_KNOWLEDGE_PACK,
+    )
 }
 
 
 def _fortios_pack():
-    from app.knowledge_packs.fortios_7 import FORTIOS_7_KNOWLEDGE_PACK
     return FORTIOS_7_KNOWLEDGE_PACK
 
 
@@ -119,8 +127,6 @@ def load_validated_knowledge_pack_by_version(
 ) -> KnowledgePack:
     """Load an immutable historical pack by its exact pinned identity."""
     pack = KNOWLEDGE_PACKS_BY_VERSION.get(knowledge_pack_version_id)
-    if pack is None and knowledge_pack_version_id == UUID("a1b2c3d4-2222-5aaa-8aaa-000000000013"):
-        pack = _fortios_pack()
     if pack is None:
         raise InterpretationValidationError(
             "knowledge_pack_unavailable", "No compatible knowledge pack is available"

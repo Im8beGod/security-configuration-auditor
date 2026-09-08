@@ -13,7 +13,10 @@ from app.interpretation.service import (
     load_validated_knowledge_pack_by_version,
 )
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
-from app.knowledge_packs.fortios_7 import FORTIOS_7_KNOWLEDGE_PACK
+from app.knowledge_packs.fortios_7 import (
+    FORTIOS_7_KNOWLEDGE_PACK,
+    FORTIOS_7_KNOWLEDGE_PACK_V1,
+)
 from app.parsing import ArtifactProvenance, parse_configuration_text
 from app.parsing.readers import FORTIOS_CLI_READER_ID, INDENTATION_CLI_READER_ID
 from app.profile_resolution import FORTIOS_7
@@ -52,6 +55,9 @@ def test_fortios_pack_is_immutable_and_profile_compatible():
     assert load_validated_knowledge_pack_by_version(
         FORTIOS_7_KNOWLEDGE_PACK.knowledge_pack_version_id
     ) is FORTIOS_7_KNOWLEDGE_PACK
+    assert load_validated_knowledge_pack_by_version(
+        FORTIOS_7_KNOWLEDGE_PACK_V1.knowledge_pack_version_id
+    ) is FORTIOS_7_KNOWLEDGE_PACK_V1
 
 
 def test_fortios_fixture_maps_canonical_fields_and_preserves_evidence():
@@ -66,7 +72,22 @@ def test_fortios_fixture_maps_canonical_fields_and_preserves_evidence():
     assert all(fact.evidence_refs and fact.evidence_refs[0].source_path == "fortios.conf" for fact in facts)
 
 
-def test_fortios_wrong_scope_and_unknown_syntax_remain_unresolved():
+def test_fortios_disabled_fixture_explicitly_disables_both_protocols():
+    facts = _facts((ROOT / "insecure.conf").read_text())
+    values = {(fact.field_id, fact.value.value) for fact in facts}
+    assert ("management.remote.ssh.enabled", False) in values
+    assert ("management.remote.telnet.enabled", False) in values
+    assert ("management.session.idle_timeout", 3600) in values
+
+
+def test_fortios_telnet_enabled_fixture_preserves_ssh_disabled_evidence():
+    facts = _facts((ROOT / "telnet_enabled.conf").read_text())
+    values = {(fact.field_id, fact.value.value) for fact in facts}
+    assert ("management.remote.telnet.enabled", True) in values
+    assert ("management.remote.ssh.enabled", False) in values
+
+
+def test_fortios_port_only_configuration_remains_unknown():
     result = interpret_structural_ir(
         _ir((ROOT / "unknown.conf").read_text()), CONTEXT,
         profile_version_id=FORTIOS_7.profile_version_id,
@@ -77,12 +98,25 @@ def test_fortios_wrong_scope_and_unknown_syntax_remain_unresolved():
     assert result.metrics.unsupported_cases == 0
 
 
+def test_fortios_incomplete_allowaccess_evidence_remains_unresolved():
+    result = interpret_structural_ir(
+        _ir((ROOT / "ambiguous.conf").read_text()), CONTEXT,
+        profile_version_id=FORTIOS_7.profile_version_id,
+        knowledge_pack=FORTIOS_7_KNOWLEDGE_PACK,
+    )
+    assert not result.facts
+    assert "invalid_fortios_allowaccess" in {item.code for item in result.diagnostics}
+    assert result.unresolved_node_ids
+
+
 def test_fortios_unset_uses_existing_effective_state_reset_semantics():
-    facts = _facts("config system global\n unset admin-telnet-port\nend\n")
-    assert len(facts) == 1
-    assert facts[0].field_id == "management.remote.telnet.enabled"
-    assert facts[0].value.value is None
-    assert facts[0].validation_status.value == "unresolved"
+    facts = _facts("config system interface\n edit \"port1\"\n  unset allowaccess\n next\nend\n")
+    assert {fact.field_id for fact in facts} == {
+        "management.remote.telnet.enabled",
+        "management.remote.ssh.enabled",
+    }
+    assert all(fact.value.value is None for fact in facts)
+    assert all(fact.validation_status.value == "unresolved" for fact in facts)
 
 
 def test_fortios_facts_resolve_through_existing_effective_state_engine():

@@ -381,10 +381,10 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
             assert outcome.stages == (AuditProcessingStage.IDENTIFYING,)
             with factory() as db:
                 candidate = db.get(Audit, candidate_id)
-                assert candidate.status == AuditStatus.PROCESSING
+                assert candidate.status == AuditStatus.FAILED
                 assert candidate.processing_stage == AuditProcessingStage.IDENTIFYING
+                assert candidate.completed_at is not None
                 assert candidate.version_refs == {}
-                assert candidate.completed_at is None
                 assert db.scalar(select(func.count()).select_from(SecurityFact).where(
                     SecurityFact.audit_id == candidate_id
                 )) == 0

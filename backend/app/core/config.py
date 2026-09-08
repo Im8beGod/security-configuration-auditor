@@ -77,6 +77,25 @@ class Settings(ApplicationSettings):
         default=1.0, ge=0.1, allow_inf_nan=False
     )
     ai_mapping_suggestions_enabled: bool = False
+    ai_mapping_provider: Literal["ollama"] = "ollama"
+    ai_ollama_base_url: str = "http://localhost:11434"
+    ai_ollama_model: str = Field(default="qwen2.5-coder:7b-instruct-q4_K_M", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:/-]+$")
+    ai_ollama_timeout_seconds: float = Field(default=120, ge=1, le=300)
+
+    @field_validator("ai_ollama_model")
+    @classmethod
+    def validate_local_model(cls, value: str) -> str:
+        if value.lower().endswith((":cloud", "-cloud")):
+            raise ValueError("Cloud models are not permitted for local mapping assistance")
+        return value
+
+    @field_validator("ai_ollama_base_url")
+    @classmethod
+    def validate_local_ai_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1", "host.docker.internal", "ollama"} or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise ValueError("Ollama must use a local HTTP origin without credentials or a path")
+        return value.rstrip("/")
 
     @model_validator(mode="after")
     def validate_cookie_security(self) -> "Settings":

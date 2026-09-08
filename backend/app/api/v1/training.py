@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import require_roles
 from app.db.models import UnresolvedReviewStatus, User, UserRole
 from app.db.session import get_db
-from app.training.ai import AISuggestionProvider, AISuggestionUnavailable, DisabledAISuggestionProvider
+from app.training.ai import AISuggestionProvider, AISuggestionUnavailable, DisabledAISuggestionProvider, OllamaSuggestionProvider, AISuggestionInvalid, SuggestionPreview, AdoptSuggestionRequest
 from app.training.schemas import (
     CanonicalFieldResponse, ImpactResponse, KnowledgePackResponse, KnowledgePackVersionResponse,
     MappingCreateRequest, MappingResponse, MappingUpdateRequest, MappingValidationRequest, ReviewUpdateRequest,
@@ -17,9 +17,10 @@ from app.training.service import (
     TrainingConflict, TrainingError, TrainingNotFound, approve_mapping,
     create_mapping, get_mapping, get_unresolved, impact_analysis, list_packs,
     list_unresolved, pack_versions, publish_mapping, reject_mapping, request_validation,
-    suggest_mapping, update_mapping, update_review_status,
+    adopt_suggestion, suggest_mapping, update_mapping, update_review_status,
 )
 from app.security_model import FIELD_REGISTRY
+from app.core.config import Settings, get_settings
 from app.profile_resolution import PROFILE_REGISTRY
 
 
@@ -27,8 +28,14 @@ router = APIRouter(prefix="/training", tags=["training"])
 TrainingAdmin = Annotated[User, Depends(require_roles(UserRole.MAPPING_ADMIN, UserRole.ADMIN))]
 
 
-def get_ai_suggestion_provider() -> AISuggestionProvider:
-    return DisabledAISuggestionProvider()
+def get_ai_suggestion_provider(settings: Annotated[Settings, Depends(get_settings)]) -> AISuggestionProvider:
+    return OllamaSuggestionProvider(settings) if settings.ai_mapping_suggestions_enabled else DisabledAISuggestionProvider()
+
+
+@router.get("/ai/status")
+def ai_status(user: TrainingAdmin, settings: Annotated[Settings, Depends(get_settings)]):
+    status = OllamaSuggestionProvider(settings).status() if settings.ai_mapping_suggestions_enabled else {"available": False, "reason": "Local AI is disabled"}
+    return {"provider": settings.ai_mapping_provider, "model": settings.ai_ollama_model, "enabled": settings.ai_mapping_suggestions_enabled, **status}
 
 
 @router.get("/canonical-fields", response_model=list[CanonicalFieldResponse])
@@ -57,6 +64,8 @@ def training_profiles(user: TrainingAdmin):
 
 
 def _raise(error: Exception) -> None:
+    if isinstance(error, AISuggestionInvalid):
+        raise HTTPException(422, str(error)) from error
     if isinstance(error, TrainingNotFound):
         raise HTTPException(404, str(error)) from error
     if isinstance(error, AISuggestionUnavailable):
@@ -87,10 +96,18 @@ def unresolved_update(block_id: UUID, request: ReviewUpdateRequest, user: Traini
         db.rollback(); _raise(error)
 
 
-@router.post("/unresolved/{block_id}/suggest", response_model=MappingResponse, status_code=201)
-def unresolved_suggest(block_id: UUID, user: TrainingAdmin, db: Annotated[Session, Depends(get_db)], provider: Annotated[AISuggestionProvider, Depends(get_ai_suggestion_provider)]):
+@router.post("/unresolved/{block_id}/suggest", response_model=SuggestionPreview)
+def unresolved_suggest(block_id: UUID, user: TrainingAdmin, db: Annotated[Session, Depends(get_db)], provider: Annotated[AISuggestionProvider, Depends(get_ai_suggestion_provider)], settings: Annotated[Settings, Depends(get_settings)]):
     try:
-        return suggest_mapping(db, user, block_id, provider)
+        return suggest_mapping(db, user, block_id, provider, settings.jwt_secret.get_secret_value())
+    except Exception as error:
+        db.rollback(); _raise(error)
+
+
+@router.post("/unresolved/{block_id}/adopt", response_model=MappingResponse, status_code=201)
+def unresolved_adopt(block_id: UUID, request: AdoptSuggestionRequest, user: TrainingAdmin, db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
+    try:
+        return adopt_suggestion(db, user, block_id, request.adoption_token, settings.jwt_secret.get_secret_value())
     except Exception as error:
         db.rollback(); _raise(error)
 

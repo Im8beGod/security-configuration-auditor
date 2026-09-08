@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { CanonicalField, ImpactAnalysis, KnowledgePack, KnowledgePackVersion, MappingDefinition, MappingVersion, Publication, ReviewStatus, TrainingProfile, UnresolvedBlock, ValidationRequest } from '../types/training'
+import type { MappingSuggestionPreview, LocalAIStatus, CanonicalField, ImpactAnalysis, KnowledgePack, KnowledgePackVersion, MappingDefinition, MappingVersion, Publication, ReviewStatus, TrainingProfile, UnresolvedBlock, ValidationRequest } from '../types/training'
 
 const json = (value: unknown) => JSON.stringify(value)
 export const trainingKeys = {
@@ -16,7 +16,9 @@ export const trainingKeys = {
 export async function listUnresolved(status: ReviewStatus | ''): Promise<UnresolvedBlock[]> { return await apiRequest(`/training/unresolved${status ? `?review_status=${status}` : ''}`) as UnresolvedBlock[] }
 export async function getUnresolved(id: string): Promise<UnresolvedBlock> { return await apiRequest(`/training/unresolved/${id}`) as UnresolvedBlock }
 export async function updateUnresolved(id: string, reviewStatus: ReviewStatus): Promise<UnresolvedBlock> { return await apiRequest(`/training/unresolved/${id}`, { method: 'PATCH', body: json({ review_status: reviewStatus }) }) as UnresolvedBlock }
-export async function suggestMapping(id: string): Promise<MappingVersion> { return await apiRequest(`/training/unresolved/${id}/suggest`, { method: 'POST' }) as MappingVersion }
+export async function suggestMapping(id: string): Promise<MappingSuggestionPreview> { return await apiRequest(`/training/unresolved/${id}/suggest`, { method: 'POST' }) as MappingSuggestionPreview }
+export async function localAIStatus(): Promise<LocalAIStatus> { return await apiRequest('/training/ai/status') as LocalAIStatus }
+export async function adoptSuggestion(id: string, token: string): Promise<MappingVersion> { return await apiRequest(`/training/unresolved/${id}/adopt`, { method: 'POST', body: json({ adoption_token: token }) }) as MappingVersion }
 export async function listCanonicalFields(): Promise<CanonicalField[]> { return await apiRequest('/training/canonical-fields') as CanonicalField[] }
 export async function createMapping(payload: { mapping_key: string; title: string; description: string; definition: MappingDefinition; unresolved_block_id?: string }): Promise<MappingVersion> { return await apiRequest('/training/mappings', { method: 'POST', body: json(payload) }) as MappingVersion }
 export async function getMapping(id: string): Promise<MappingVersion> { return await apiRequest(`/training/mappings/${id}`) as MappingVersion }

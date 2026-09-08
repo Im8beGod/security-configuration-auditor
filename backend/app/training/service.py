@@ -22,7 +22,7 @@ from app.jobs.service import enqueue_job
 from app.profile_resolution.registry import PROFILE_REGISTRY
 from app.security_model import FIELD_REGISTRY
 from app.training import repository
-from app.training.ai import AISuggestionProvider, MappingSuggestion, sanitized_context
+from app.training.ai import AISuggestionProvider, MappingSuggestion, sanitized_context, validate_suggestion, sign_preview, verify_preview
 from app.training.dsl import MappingDefinition, ValidationNode, extract, matches
 
 
@@ -76,13 +76,26 @@ def similar_published(db: Session, block: UnresolvedBlock) -> list[dict[str, Any
     return [{"mapping_version_id": str(item.mapping_version_id), "mapping_key": item.mapping_key, "target_field_id": item.target_field_id, "structural_match": item.structural_match} for item in ranked[:10]]
 
 
-def suggest_mapping(db: Session, user: User, block_id: UUID, provider: AISuggestionProvider) -> MappingVersion:
+def suggest_mapping(db: Session, user: User, block_id: UUID, provider: AISuggestionProvider, signing_key: str):
+    _require_admin(user)
     block = get_unresolved(db, user, block_id)
-    context = sanitized_context(block.raw_text, block.surrounding_context, block.profile_version_id, block.candidate_field_ids, similar_published(db, block))
-    suggestion = provider.suggest_mapping(context)
-    if not isinstance(suggestion, MappingSuggestion):
-        suggestion = MappingSuggestion.model_validate(suggestion)
-    mapping = _new_mapping(db, user, f"suggested-{block.fingerprint[:16]}", suggestion.description, suggestion.definition, MappingOrigin.AI_ASSISTED, MappingStatus.SUGGESTED, {"confidence": suggestion.confidence, "similar_mapping_refs": suggestion.similar_mapping_refs, "provider": suggestion.provider_metadata})
+    structural = {key: block.occurrence[key] for key in ("xml_path", "tag", "command", "parent_command", "scope_type") if key in block.occurrence}
+    context = sanitized_context(block.raw_text, block.surrounding_context, block.profile_version_id, block.candidate_field_ids, [], structural_context=json.dumps(structural))
+    suggestion = MappingSuggestion.model_validate(provider.suggest_mapping(context).model_dump(mode="json"))
+    validate_suggestion(suggestion, block.profile_version_id)
+    return sign_preview(suggestion, context, user, block, signing_key)
+
+
+def adopt_suggestion(db: Session, user: User, block_id: UUID, token: str, signing_key: str):
+    _require_admin(user)
+    block = db.scalar(select(UnresolvedBlock).where(UnresolvedBlock.unresolved_block_id == block_id, UnresolvedBlock.organization_id == user.organization_id).with_for_update())
+    if block is None:
+        raise TrainingNotFound("Unresolved block not found")
+    suggestion = verify_preview(token, user, block, signing_key)
+    if block.assigned_mapping_version_id or block.review_status not in {UnresolvedReviewStatus.OPEN, UnresolvedReviewStatus.UNDER_REVIEW}:
+        raise TrainingConflict("Evidence is already assigned or no longer actionable")
+    metadata = {"confidence": suggestion.confidence, "caveats": suggestion.caveats, "provider": suggestion.provider_metadata, "evidence_refs": block.evidence_refs, "unresolved_block_id": str(block_id)}
+    mapping = _new_mapping(db, user, f"ai-{block.fingerprint[:16]}", suggestion.description, suggestion.definition, MappingOrigin.AI_ASSISTED, MappingStatus.DRAFT, metadata)
     block.review_status = UnresolvedReviewStatus.UNDER_REVIEW
     block.assigned_mapping_version_id = mapping.mapping_version_id
     db.commit()

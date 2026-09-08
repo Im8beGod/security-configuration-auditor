@@ -83,3 +83,14 @@ export interface ImpactAnalysis {
 export interface KnowledgePack { knowledge_pack_id: string; pack_key: string; name: string; created_at: string }
 export interface KnowledgePackVersion { knowledge_pack_version_id: string; knowledge_pack_id: string; version: number; previous_knowledge_pack_version_id: string | null; mapping_version_ids: string[]; published_by: string; published_at: string }
 export interface TrainingProfile { profile_id: string; profile_version_id: string; vendor: string; product_family: string; os: string; reader: string | null; coverage: Record<string, unknown>; capabilities: string[] }
+
+export interface MappingSuggestionPreview {
+  suggestion: { definition: MappingDefinition; description: string; confidence: number; caveats: string[]; provider_metadata: Record<string, string> }
+  evidence_references: Record<string, string>[]
+  redaction_occurred: boolean
+  truncation_occurred: boolean
+  adoption_token: string
+  evidence: Record<string, string>
+  validation: string
+}
+export interface LocalAIStatus { provider: string; model: string; enabled: boolean; available: boolean; reason: string }

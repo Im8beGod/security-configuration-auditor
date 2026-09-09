@@ -42,7 +42,7 @@ def test_postgres_bootstrap_and_cookie_authentication():
     engine = create_database_engine(settings)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0018"
             before = application_counts(connection)
             connection.rollback()
             transaction = connection.begin()
@@ -130,6 +130,6 @@ def test_postgres_bootstrap_and_cookie_authentication():
                 transaction.rollback()
         with engine.connect() as connection:
             assert application_counts(connection) == before
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0018"
     finally:
         engine.dispose()

@@ -14,8 +14,11 @@ from app.jobs.service import claim_next_job, complete_job, enqueue_job, fail_job
 
 
 EXPECTED_TABLES = {
-    "artifacts", "audits", "devices", "effective_states", "findings", "jobs", "organizations", "security_facts",
-    "snapshots", "users", "remediation_procedures", "reports", "unresolved_blocks", "mapping_versions", "mapping_validation_runs", "knowledge_packs", "knowledge_pack_versions"
+    "artifacts", "assessment_obligations", "assessment_pack_versions", "assessment_results", "audit_assessments",
+    "audits", "devices", "effective_states", "findings", "jobs", "knowledge_pack_versions", "knowledge_packs",
+    "mapping_validation_runs", "mapping_versions", "organizations", "profile_manifest_versions",
+    "profile_resolution_decisions", "remediation_procedures", "reports", "security_facts", "snapshots",
+    "unresolved_blocks", "users",
 }
 
 

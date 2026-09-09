@@ -237,8 +237,10 @@ def test_api_surface_and_configured_prefix(auth_settings):
         "/api/test/artifacts/bulk-upload": {"post"},
         "/api/test/artifacts/{artifact_id}": {"get"},
             "/api/test/audits": {"get", "post"},
+            "/api/test/audits/assessment-packs": {"get"},
             "/api/test/audits/batch": {"post"},
             "/api/test/audits/{audit_id}": {"get"},
+            "/api/test/audits/{audit_id}/profile-resolution": {"get"},
             "/api/test/audits/{audit_id}/reevaluation-eligibility": {"get"},
             "/api/test/audits/{audit_id}/revisions": {"get"},
             "/api/test/audits/{audit_id}/re-evaluate": {"post"},
@@ -262,6 +264,7 @@ def test_api_surface_and_configured_prefix(auth_settings):
         "/api/test/jobs/{job_id}": {"get"},
         "/api/test/training/unresolved": {"get"},
         "/api/test/training/unresolved/{block_id}": {"get", "patch"},
+        "/api/test/training/unresolved/{block_id}/adopt": {"post"},
         "/api/test/training/unresolved/{block_id}/suggest": {"post"},
         "/api/test/training/mappings": {"post"},
         "/api/test/training/mappings/{mapping_version_id}": {"get", "put"},
@@ -273,6 +276,9 @@ def test_api_surface_and_configured_prefix(auth_settings):
         "/api/test/training/knowledge-packs": {"get"},
         "/api/test/training/knowledge-packs/{pack_id}/versions": {"get"},
         "/api/test/training/canonical-fields": {"get"},
+        "/api/test/training/ai/status": {"get"},
+        "/api/test/training/capabilities": {"get"},
+        "/api/test/training/profiles": {"get"},
     }
     with TestClient(application) as client:
         assert client.post("/api/test/auth/register").status_code == 404

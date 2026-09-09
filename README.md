@@ -1,151 +1,148 @@
-# AI-Driven Multi-Vendor Network Security Compliance Auditor
+# SIH 26155
 
-SIH 26155 is a bounded, evidence-first auditor for Cisco IOS XE 17.x and
-Fortinet FortiOS 7.x configuration evidence. It preserves supplied evidence,
-normalizes vendor meaning into shared security semantics, and produces
-deterministic, reviewable compliance results.
+## AI-Driven Multi-Vendor Network Security Compliance Auditor
 
-## Product Flow
+SIH 26155 is an evidence-first competition prototype for reviewing bounded
+network-device configuration evidence. It turns supplied configurations into
+traceable, deterministic findings—not an automated device-management system.
+
+## Problem
+
+Configuration reviews are often vendor-specific, difficult to reproduce, and
+hard to connect to evidence. This prototype preserves the submitted evidence,
+normalizes its security meaning, and makes each result reviewable.
+
+## What the prototype does
 
 ```text
-Configuration
--> vendor/profile detection
--> structural parsing
--> canonical SecurityFacts
--> EffectiveState
--> deterministic compliance
--> Findings/Evidence
--> remediation/reporting
+Evidence upload -> Device -> immutable Snapshot -> profile detection
+-> structural parsing -> semantic interpretation -> SecurityFacts
+-> EffectiveState -> deterministic compliance -> Findings + Evidence
+-> reviewed remediation guidance -> PDF report -> Fleet Dashboard
 ```
 
-Supported vendor readers are `indentation_cli.v1` for Cisco IOS XE and
-`fortios_cli.v1` for FortiOS. Both feed the same canonical facts, effective
-state, compliance engine, findings model, and report format.
+The advanced extension uses a declarative `ProfileManifest`, a generic XML
+structural reader, low-code mappings, executable validation, human approval,
+and immutable Knowledge Packs so future audits can reuse reviewed knowledge.
 
-## Capabilities
+## Architecture and trust boundary
 
-- Single-file and multi-file evidence upload
-- True multi-device batch auditing through `POST /api/v1/audits/batch`
-- Cisco IOS XE 17.x and FortiOS 7.x profile-aware processing
-- PASS, FAIL, and UNKNOWN verdicts with severity, evidence, and provenance
-- Findings mapped to selected NIST SP 800-53 Rev. 5 controls
-- Supervised Review Center for unresolved syntax and low-code mappings
-- Persistent immutable Knowledge Packs and validated publication workflow
-- Historical re-evaluation using the same evidence and a new immutable revision
-- Per-device PDF reports with identity and hardware details
-- Reviewed Cisco remediation preview catalog for SSH v2, remote logging, and NTP
+PASS, FAIL, and UNKNOWN verdicts are produced by the deterministic compliance
+engine from persisted evidence and effective state. AI does not decide a
+verdict, approve a mapping, or publish knowledge. Evidence, finalized
+Snapshots, Audit revisions, and published Knowledge Pack versions are
+immutable at their lifecycle boundaries.
 
-Snapshots, Artifacts, and Audit revisions are immutable at their respective
-lifecycle boundaries. Batch submission is stateless and returns per-device
-accepted or rejected results without introducing a persistent Batch model.
+## Prototype-supported vendors
 
-## AI and Compliance Boundaries
+- Cisco IOS XE 17.x
+- Fortinet FortiOS 7.x
+- Juniper Junos 18.x XML onboarding
 
-An AI suggestion interface exists for optional mapping assistance. Suggestions
-are advisory, the production AI provider is not currently configured, and the
-deterministic manual workflow works without AI. AI never determines PASS,
-FAIL, or UNKNOWN.
+Coverage is intentionally profile- and version-bounded; this is not universal
+support for every vendor or release.
 
-Findings are **mapped to selected NIST SP 800-53 Rev. 5 controls**. This is a
-traceability mapping, not a claim of NIST compliance, certification, or full
-coverage. CIS, DISA STIG, and ISO mapping packs are not currently implemented.
+## Assessment frameworks
 
-Reviewed Cisco procedures currently cover:
+Implemented AssessmentPacks provide scoped technical prototype coverage for:
 
-- SSH v2
-- Remote logging host
-- NTP server
+- NIST SP 800-53 Rev. 5
+- DISA Network Device Management SRG
+- CIS Cisco IOS XE 17.x Benchmark v2.2.1
+- ISO/IEC 27001:2022 technical alignment derived through NIST OLIR
 
-FortiOS remediation is deliberately unavailable pending publication of a
-reviewed procedure catalog. No remediation command is executed by the system.
+NIST, DISA, and CIS packs are scoped technical subsets. ISO material is
+technical alignment only.
 
-## Repository Layout
+## Key features
 
-- `backend/` - FastAPI application, domain services, worker handlers, and tests
-- `frontend/` - React and TypeScript application
-- `database/` - Alembic configuration and migrations
-- `storage/` - local development artifact and report mounts
-- `docs/` - architecture, demo, presentation, and development notes
-- `docker-compose.yml` - local backend, worker, frontend, and PostgreSQL stack
+- Single- and multi-file evidence upload with device and immutable Snapshot records
+- Profile-aware multi-vendor normalization into shared SecurityFacts and EffectiveState
+- Deterministic PASS, FAIL, and UNKNOWN findings with persisted evidence and provenance
+- Reviewed, preview-only remediation guidance across Cisco, FortiOS, and Junos
+- PDF reporting and a fleet dashboard
+- Low-code mapping, validation, approval, immutable Knowledge Packs, and historical re-evaluation
 
-## Setup
+## AI safety boundary
 
-Prerequisites: Python 3.13+, Node.js/npm, Docker Desktop, Docker Compose, and
-Git.
+Optional local Ollama integration provides mapping suggestions only. There is
+no cloud fallback, no automatic approval, and auditing continues without AI.
+
+## Remediation safety boundary
+
+Remediation is reviewed guidance and preview only. The system never executes
+device commands and never autonomously modifies device configurations.
+
+## Technology stack
+
+FastAPI and Python, PostgreSQL with Alembic, a PostgreSQL-backed worker,
+React/TypeScript, Docker Compose, and local artifact/report storage.
+
+## Quick start
+
+Prerequisites: Python 3.13+, Node.js/npm, Docker Desktop, Docker Compose, and Git.
 
 ```powershell
 Copy-Item .env.example .env
-# Replace development-only password and JWT values in .env.
+# Replace development-only placeholders in .env.
 docker compose config --quiet
 docker compose up -d --build
 docker compose run --rm backend alembic -c database/alembic.ini upgrade head
 ```
 
-The frontend is available at `http://localhost:5173`; the API is available at
-`http://localhost:8000`, with health check `GET /health`. PostgreSQL is
-available to Compose services as `postgres:5432` and from the host as port
-`5433` by default.
+The frontend is available at `http://localhost:5173`; the API is at
+`http://localhost:8000` (`GET /health`).
 
-## Backend Development
+## 3-5 minute demo
+
+1. Sign in and open the Fleet Dashboard.
+2. Upload the approved Cisco IOS XE development fixture at
+   `backend/tests/fixtures/cisco_ios_xe/representative.cfg`; create or confirm
+   its Device and Snapshot.
+3. Select an applicable AssessmentPack and run the audit.
+4. Open a FAIL or UNKNOWN finding to show persisted evidence, then open the
+   reviewed remediation preview.
+5. Generate the PDF report and return to the Fleet Dashboard.
+
+Use [the demo runbook](docs/demo-runbook.md) for judge narration.
+
+## Repository structure
+
+- `backend/` — FastAPI application, domain services, tests, and fixtures
+- `frontend/` — React and TypeScript application
+- `database/` — Alembic configuration and migrations
+- `worker/` — PostgreSQL durable-job worker runtime
+- `docs/` — architecture and demonstration material
+- `storage/` — local development artifact and report mounts
+
+## Known limitations
+
+- Framework coverage is a prototype subset, not certification.
+- There is no public/cloud production deployment in this repository.
+- Vendor and version coverage is intentionally bounded.
+- Local AI assistance is optional and advisory only.
+- The persistent PostgreSQL worker provides durable jobs, transactional
+  claiming with `FOR UPDATE SKIP LOCKED`, explicit handlers, bounded failure
+  metadata, graceful shutdown, and no automatic retries. A hard worker/process
+  failure after a job enters PROCESSING can require manual operational recovery.
+
+## Prototype and non-certification disclaimer
+
+This prototype does not provide NIST, DISA, STIG, CIS, or ISO certification;
+does not provide CIS-CAT equivalence; and does not claim full framework
+coverage, universal compliance, or ISO conformity assessment.
+
+## Migration and verification
+
+The final Alembic head is `20260909_0018`. The backend and worker never apply
+migrations automatically.
 
 ```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m pytest tests/unit -q
-uvicorn app.main:app --reload
-```
-
-## Frontend Development
-
-```powershell
-cd frontend
-npm ci
-npm run build
-npm run lint
-npm run dev
-```
-
-## Migrations and Verification
-
-The current Alembic head is `20260908_0011`. Apply migrations explicitly; the
-backend and worker do not migrate the database automatically.
-
-```powershell
-alembic -c database/alembic.ini heads
-alembic -c database/alembic.ini current
-python -m compileall backend/app backend/tests
+docker compose run --rm backend alembic -c database/alembic.ini heads
+docker compose run --rm backend alembic -c database/alembic.ini current
+docker compose run --rm backend alembic -c database/alembic.ini check
 git diff --check
 ```
 
-Focused backend tests cover profile resolution, both vendor readers, the
-deterministic compliance path, Review Center publication, remediation preview,
-reporting, re-evaluation, and the multi-device batch boundary. PostgreSQL
-integration tests are opt-in and document their required environment flags in
-the test files.
-
-## Demo Quick Start
-
-1. Start the Compose stack and apply migration head as shown above.
-2. Sign in with a bootstrapped administrator account.
-3. Upload Cisco and FortiOS configuration evidence and create one Snapshot per
-   device.
-4. Submit the two snapshots through the batch audit endpoint or the existing
-   audit workflow.
-5. Review PASS/FAIL/UNKNOWN findings, evidence, selected NIST mappings, and
-   the reviewed Cisco remediation preview.
-6. Open Review Center for unresolved syntax, publish only after validation and
-   administrator approval, then explicitly re-evaluate to create a new
-   immutable revision.
-7. Generate the per-device PDF report and show identity, hardware, findings,
-   and evidence.
-
-See [the demo script](docs/demo/DEMO_SCRIPT.md) and [the five-slide content](docs/presentation/SIH_5_SLIDE_CONTENT.md).
-
-## Security Notes
-
-All API reads and writes are organization-scoped. Evidence and report storage
-is protected, internal job payloads are not exposed through the public API, and
-real `.env` files, secrets, uploaded artifacts, reports, caches, and database
-dumps must never be committed.
+Real `.env` files, secrets, uploaded artifacts, reports, caches, database
+dumps, and runtime storage must never be committed.

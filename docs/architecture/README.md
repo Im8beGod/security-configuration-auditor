@@ -22,8 +22,10 @@ second audit pipeline.
 
 - Cisco IOS XE 17.x uses `indentation_cli.v1`.
 - FortiOS 7.x uses `fortios_cli.v1`.
-- Both readers produce structural data that converges into shared canonical
-  semantics and the same EffectiveState and compliance engine.
+- Juniper Junos 18.x XML onboarding uses the generic XML structural reader and
+  declarative ProfileManifest mappings.
+- All prototype-supported profiles converge into shared canonical semantics,
+  EffectiveState, and the deterministic compliance engine.
 - Vendor-specific syntax remains in evidence and provenance; verdict semantics
   remain vendor-neutral.
 
@@ -69,12 +71,13 @@ is not recollected or replaced during re-evaluation.
 
 ## Frameworks and Bounded Claims
 
-The product exposes mappings to selected NIST SP 800-53 Rev. 5 controls for
-traceability. It does not claim NIST compliance, certification, or full
-framework coverage. CIS, DISA STIG, and ISO mapping packs are not currently
-implemented.
+Implemented AssessmentPacks provide scoped technical prototype coverage for
+NIST SP 800-53 Rev. 5, DISA Network Device Management SRG, and the CIS Cisco
+IOS XE 17.x Benchmark v2.2.1. ISO/IEC 27001:2022 is technical alignment derived
+through NIST OLIR. These are not claims of certification, full framework
+coverage, universal compliance, CIS-CAT equivalence, or ISO conformity
+assessment.
 
-Remediation commands are never executed automatically. Reviewed Cisco
-remediation procedures currently cover SSH v2, remote logging, and NTP. FortiOS
-remediation is unavailable pending reviewed procedure publication. Support is
-limited to the documented Cisco IOS XE 17.x and FortiOS 7.x profiles.
+Remediation is reviewed, profile-scoped guidance across Cisco, FortiOS, and
+Junos. It is preview-only: commands are never executed automatically. Vendor
+and version coverage remains intentionally bounded.

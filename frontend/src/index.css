@@ -284,6 +284,42 @@ th { color: var(--muted); background: #f0f2ec; font-size: 0.75rem; letter-spacin
 .data-table th { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .report-panel { border-left: 4px solid #d59b3d; }
 
+/* B11.1 operational-screen polish */
+.header-actions, .workflow-steps, .workflow-note { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.header-actions { justify-content: flex-end; }
+.workflow-steps, .workflow-note { padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #f5f7f3; font-size: 0.78rem; font-weight: 700; }
+.workflow-steps i, .workflow-note i { color: var(--forest-bright); font-style: normal; }
+.workflow-steps .current, .workflow-note strong { color: var(--forest); }
+.dashboard-heading { padding: 1.25rem; border: 1px solid var(--line); border-radius: 0.8rem; background: #f8faf7; }
+.dashboard-metrics article { position: relative; overflow: hidden; border: 1px solid var(--line); border-top: 4px solid var(--forest); border-radius: 0.7rem; box-shadow: 0 8px 22px rgba(21, 37, 31, 0.05); }
+.dashboard-metrics article::after { position: absolute; right: -1rem; bottom: -1.5rem; width: 5rem; height: 5rem; border: 1px solid #dbe5dd; border-radius: 50%; content: ''; }
+.dashboard-metrics .risk-critical { border-top-color: #8c2d27; background: #fff9f8; }
+.dashboard-metrics .risk-high { border-top-color: #c56a2d; background: #fffaf5; }
+.dashboard-metrics .risk-review { border-top-color: #b98620; background: #fffdf5; }
+.empty-state { display: grid; gap: 0.35rem; padding: 1.25rem; border: 1px dashed #b6c2ba; border-radius: 0.65rem; color: var(--muted); background: #f8faf7; }
+.empty-state strong { color: var(--ink); }
+.upload-heading { align-items: center; }
+.upload-panel { display: grid; gap: 1.25rem; }
+.file-drop { min-height: 12rem; border-color: #7eaa96; background: #f4f8f3; transition: border-color 150ms ease, background 150ms ease; }
+.file-drop:hover, .file-drop:focus-within { border-color: var(--forest-bright); background: #edf5ee; }
+.file-drop .eyebrow { margin-bottom: 0.25rem; }
+.workflow-note { width: fit-content; }
+.entity-card { border-top: 3px solid #d7e2d9; }
+.entity-card:hover { border-top-color: var(--forest-bright); }
+.timeline-item { border-left: 3px solid transparent; }
+.timeline-item:hover { border-left-color: var(--forest-bright); background: #f8faf7; }
+.stat-strip { box-shadow: 0 8px 22px rgba(21, 37, 31, 0.04); }
+.stat-strip > div:first-child { border-top: 3px solid var(--forest-bright); }
+.queue-panel { border-top: 4px solid #4475a8; }
+.queue-panel .progress-track { background: #dbe7f1; }
+.finding-card { border-left-width: 5px; }
+.finding-card:has(.verdict-fail) { border-left-color: #8c2d27; background: #fffafa; }
+.finding-card:has(.verdict-unknown) { border-left-color: #b98620; background: #fffdf5; }
+.evidence-state { border-left: 4px solid #4475a8; }
+.evidence-artifact { border: 1px solid #d8e1da; box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
+.evidence-excerpt { border: 1px solid #315242; box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.provenance-details { border-left: 4px solid #8f9a94; }
+
 .trust-chip { display: inline-flex; padding: 0.5rem 0.75rem; border: 1px solid #d7aa58; border-radius: 999px; color: #6d4a0d; background: #fff2cc; font-weight: 800; white-space: nowrap; }
 .review-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
 .review-toolbar label { display: grid; gap: 0.35rem; font-weight: 700; }
@@ -363,6 +399,8 @@ th { color: var(--muted); background: #f0f2ec; font-size: 0.75rem; letter-spacin
   }
 
   .page-heading, .heading-actions, .next-action { align-items: stretch; flex-direction: column; }
+  .header-actions { justify-content: stretch; }
+  .workflow-steps, .workflow-note { border-radius: 0.5rem; }
   .form-grid, .hero-panel, .stat-strip, .dashboard-metrics, .coverage-grid, .dashboard-grid, .training-context-grid { grid-template-columns: 1fr; }
   .review-toolbar, .ai-entry { align-items: stretch; flex-direction: column; }
   .review-toolbar > div { text-align: left; }

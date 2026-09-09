@@ -18,9 +18,9 @@ export function UploadsPage() {
   }
 
   return <section className="page-stack">
-    <header className="page-heading"><div><span className="eyebrow">Step 1</span><h1>Upload evidence</h1></div><p>Add configuration files or structured exports. Unknown vendor syntax is accepted when the file is safe text.</p></header>
+    <header className="page-heading upload-heading"><div><span className="eyebrow">Step 1 of 4</span><h1>Upload evidence</h1><p>Add configuration files or structured exports. Unknown vendor syntax is accepted when the file is safe text.</p></div><div className="workflow-steps" aria-label="Audit workflow"><span className="current">Evidence</span><i>→</i><span>Device</span><i>→</i><span>Audit</span><i>→</i><span>Findings</span></div></header>
     <div className="panel upload-panel">
-      <label className="file-drop" htmlFor="evidence-files"><strong>Choose evidence files</strong><span>UTF-8 text, JSON, or XML. Up to 20 files, 10 MiB each.</span><input id="evidence-files" type="file" multiple onChange={selectFiles} /></label>
+      <label className="file-drop" htmlFor="evidence-files"><span className="eyebrow">Evidence intake</span><strong>Choose evidence files</strong><span>UTF-8 text, JSON, or XML. Up to 20 files, 10 MiB each.</span><input id="evidence-files" type="file" multiple onChange={selectFiles} /></label>
       {files.length > 0 ? <div><div className="section-title"><h2>Ready to upload</h2><span>{files.length} files</span></div><ul className="compact-list">{files.map((file) => <li key={`${file.name}-${file.lastModified}`}><span>{file.name}</span><small>{Math.max(1, Math.ceil(file.size / 1024))} KB</small></li>)}</ul><div className="button-row"><button className="button-primary" type="button" disabled={upload.isPending} onClick={() => upload.mutate(files)}>{upload.isPending ? 'Uploading evidence...' : 'Upload selected files'}</button><button className="button-quiet" type="button" disabled={upload.isPending} onClick={() => setFiles([])}>Clear</button></div></div> : <p className="quiet-state">Select one or more files to begin.</p>}
       {upload.isError && <p className="error-message" role="alert">{errorMessage(upload.error)}</p>}
     </div>

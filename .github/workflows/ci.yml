@@ -61,26 +61,14 @@ jobs:
       - name: Apply and verify migrations
         run: |
           alembic -c ../database/alembic.ini upgrade head
-          alembic -c ../database/alembic.ini heads | grep -F "20260909_0018 (head)"
-          alembic -c ../database/alembic.ini current | grep -F "20260909_0018 (head)"
+          alembic -c ../database/alembic.ini heads | grep -F "20260909_0019 (head)"
+          alembic -c ../database/alembic.ini current | grep -F "20260909_0019 (head)"
 
       - name: Run tests
         run: python -m pytest -v
 
       - name: Check migration drift
-        run: |
-          set +e
-          output="$(alembic -c ../database/alembic.ini check 2>&1)"
-          status=$?
-          printf '%s\n' "$output"
-          if [ "$status" -eq 0 ]; then
-            exit 0
-          fi
-          printf '%s\n' "$output" | grep -F "ix_profile_manifest_versions_organization_id"
-          printf '%s\n' "$output" | grep -F "fk_profile_resolution_decisions_snapshot_id_snapshots"
-          unexpected="$(printf '%s\n' "$output" | grep -E "Detected (added|removed) (index|foreign key)" | grep -v -E "ix_profile_manifest_versions_organization_id|profile_resolution_decisions" || true)"
-          test -z "$unexpected"
-          printf '%s\n' "Known deferred pre-B12 migration drift only; see database/README.md."
+        run: alembic -c ../database/alembic.ini check
 
 
   frontend:

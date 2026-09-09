@@ -12,7 +12,7 @@ docker compose run --rm backend alembic -c database/alembic.ini current
 ```
 
 Migration scripts live in `database/migrations/`. The final migration head is
-`20260909_0018`.
+`20260909_0019`.
 
 `Device` stores logical identity. An immutable `Snapshot` is the complete
 evidence boundary for one device at one point in time; an `Artifact` can remain
@@ -32,18 +32,6 @@ payload execution.
 The worker handles graceful shutdown, but it is not high-availability queue
 infrastructure: a hard worker/process failure after a job enters PROCESSING can
 require manual operational recovery.
-
-## Deferred technical debt
-
-`alembic check` currently reports two known pre-B12 metadata differences:
-
-- the `profile_manifest_versions.organization_id` index
-- the `profile_resolution_decisions.snapshot_id` foreign-key delete metadata
-  difference (`RESTRICT` in the migration versus `CASCADE` in model metadata)
-
-They are intentionally deferred for this prototype; no migration beyond
-`20260909_0018` is created for them. CI permits only these documented
-differences and continues to fail for an unexpected migration-drift report.
 
 Directories:
 

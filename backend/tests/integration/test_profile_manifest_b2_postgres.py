@@ -21,7 +21,20 @@ def test_manifest_migration_immutability_tenant_scope_and_review_decision():
     engine = create_database_engine(get_settings())
     factory = create_session_factory(engine)
     with factory.begin() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0017"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0019"
+        assert db.scalar(text("""
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = 'profile_manifest_versions'
+              AND indexname = 'ix_profile_manifest_versions_organization_id'
+        """)) == "ix_profile_manifest_versions_organization_id"
+        assert db.scalar(text("""
+            SELECT confdeltype
+            FROM pg_constraint
+            WHERE conrelid = 'profile_resolution_decisions'::regclass
+              AND conname = 'fk_profile_resolution_decisions_snapshot_id_snapshots'
+        """)) == "c"
         global_profile = db.scalar(select(ProfileManifestVersion).where(ProfileManifestVersion.profile_version_id == "cisco.ios_xe.17@1.0.0"))
         assert global_profile is not None and global_profile.organization_id is None
         with pytest.raises(Exception, match="immutable"):

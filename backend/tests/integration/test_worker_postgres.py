@@ -221,5 +221,5 @@ def test_production_noop_and_controlled_failure_lifecycle(monkeypatch):
                     db.execute(delete(Organization).where(Organization.organization_id == organization_id))
         with factory() as db:
             assert not db.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0018"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0019"
         engine.dispose()

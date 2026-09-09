@@ -1,0 +1,128 @@
+name: sih26155-production
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    profiles: ["migration"]
+    image: sih26155/backend:${APP_VERSION:-production}
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: "no"
+    command: ["alembic", "-c", "/app/database/alembic.ini", "upgrade", "head"]
+    environment:
+      APP_ENV: production
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    image: sih26155/backend:${APP_VERSION:-production}
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_NAME: ${APP_NAME:-SIH 26155 Network Security Compliance Auditor}
+      APP_ENV: production
+      API_PREFIX: /api/v1
+      FRONTEND_ORIGIN: https://${DOMAIN:?DOMAIN is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-sih26155_access_token}
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_SAMESITE: lax
+      AUTH_COOKIE_PATH: /
+      ARTIFACT_STORAGE_PATH: /app/storage/artifacts
+      REPORT_STORAGE_PATH: /app/storage/reports
+      ARTIFACT_MAX_UPLOAD_BYTES: ${ARTIFACT_MAX_UPLOAD_BYTES:-10485760}
+      ARTIFACT_MAX_BULK_FILES: ${ARTIFACT_MAX_BULK_FILES:-20}
+      AI_MAPPING_SUGGESTIONS_ENABLED: ${AI_MAPPING_SUGGESTIONS_ENABLED:-false}
+    volumes:
+      - app_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    image: sih26155/worker:${APP_VERSION:-production}
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ARTIFACT_STORAGE_PATH: /app/storage/artifacts
+      REPORT_STORAGE_PATH: /app/storage/reports
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
+      WORKER_JOB_LEASE_SECONDS: ${WORKER_JOB_LEASE_SECONDS:-60}
+      WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-15}
+    volumes:
+      - app_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: sih26155/frontend:${APP_VERSION:-production}
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile.production
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+    ports:
+      - "${PRODUCTION_HTTP_PORT:-80}:80"
+      - "${PRODUCTION_HTTPS_PORT:-443}:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  app_storage:
+  caddy_data:
+  caddy_config:

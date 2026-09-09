@@ -128,6 +128,8 @@ select:focus-visible { outline: 3px solid rgba(35, 120, 90, 0.3); outline-offset
   margin: 0;
   list-style: none;
 }
+.nav-label { display:block; margin: .5rem .75rem; color:#718096; font-size:.68rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+.nav-advanced { margin-top: .75rem; padding-top:.75rem; border-top:1px solid #d7dce4; }
 
 .primary-navigation a {
   display: block;

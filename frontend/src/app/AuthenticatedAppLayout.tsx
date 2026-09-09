@@ -37,6 +37,7 @@ export function AuthenticatedAppLayout() {
 
       <div className="app-body">
         <nav className="primary-navigation" aria-label="Primary">
+          <span className="nav-label">Overview</span>
           <ul>
             {primaryNavigation.map((item) => (
               <li key={item.to}>
@@ -44,7 +45,7 @@ export function AuthenticatedAppLayout() {
               </li>
             ))}
             {canAccessTraining(currentUser.role) && (
-              <li>
+              <li className="nav-advanced">
                 <NavLink to="/training">Training</NavLink>
               </li>
             )}

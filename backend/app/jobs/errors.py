@@ -8,3 +8,7 @@ class JobNotFoundError(JobError):
 
 class InvalidJobTransitionError(JobError):
     """A job cannot make the requested lifecycle transition."""
+
+
+class JobLeaseLostError(JobError):
+    """A job lease is no longer owned and cannot be mutated."""

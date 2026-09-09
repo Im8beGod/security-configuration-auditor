@@ -1,4 +1,5 @@
 import logging
+import time
 from threading import Event
 from uuid import uuid4
 
@@ -169,7 +170,7 @@ def test_claim_failure_rolls_back_closes_logs_safely_and_loop_continues(
     monkeypatch.setattr(job_factory.class_, "close", tracked_close)
     calls = 0
 
-    def failing_then_idle(_db, allowed_job_types=None):
+    def failing_then_idle(_db, allowed_job_types=None, **_lease_kwargs):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -194,7 +195,7 @@ def test_claim_failure_rolls_back_closes_logs_safely_and_loop_continues(
     finally:
         event.remove(job_factory.class_, "after_rollback", tracked_rollback)
     assert calls == 2 and waits == 2
-    assert rollbacks == 1 and closes == 2
+    assert rollbacks == 1 and closes == 4
     assert "database claim failed" in caplog.text.lower()
     assert "password" not in caplog.text.lower()
     assert "secret" not in caplog.text.lower()
@@ -213,6 +214,65 @@ def test_shutdown_prevents_subsequent_claim(job_factory):
     with job_factory() as db:
         job = db.get(Job, job_id)
         assert job.status == JobStatus.QUEUED and job.attempt_count == 0
+
+
+def test_runtime_heartbeats_while_a_slow_handler_runs(job_factory):
+    with job_factory.begin() as db:
+        job_id = enqueue_job(db, JobType.SYSTEM_NOOP).job_id
+    initial_heartbeats = []
+    observed_heartbeats = []
+
+    def slow_handler(_job_id):
+        with job_factory() as db:
+            initial_heartbeats.append(db.get(Job, job_id).heartbeat_at)
+        time.sleep(0.08)
+        with job_factory() as db:
+            observed_heartbeats.append(db.get(Job, job_id).heartbeat_at)
+
+    runtime = WorkerRuntime(
+        job_factory,
+        handlers={JobType.SYSTEM_NOOP: slow_handler},
+        poll_interval_seconds=1.0,
+        lease_seconds=1.0,
+        heartbeat_interval_seconds=0.02,
+    )
+    assert runtime.run_iteration() is True
+    assert len(initial_heartbeats) == 1
+    assert len(observed_heartbeats) == 1
+    assert observed_heartbeats[0] > initial_heartbeats[0]
+    with job_factory() as db:
+        assert db.get(Job, job_id).status == JobStatus.COMPLETED
+
+
+def test_shutdown_during_handler_stops_new_claims_but_finishes_active_work(job_factory):
+    with job_factory.begin() as db:
+        first_id = enqueue_job(db, JobType.SYSTEM_NOOP).job_id
+        second_id = enqueue_job(db, JobType.SYSTEM_NOOP).job_id
+    shutdown = Event()
+    runtime = None
+    heartbeat_updates = []
+
+    def active_handler(_job_id):
+        with job_factory() as db:
+            initial_heartbeat = db.get(Job, first_id).heartbeat_at
+        runtime.request_shutdown()
+        time.sleep(0.08)
+        with job_factory() as db:
+            heartbeat_updates.append(db.get(Job, first_id).heartbeat_at > initial_heartbeat)
+
+    runtime = WorkerRuntime(
+        job_factory,
+        handlers={JobType.SYSTEM_NOOP: active_handler},
+        poll_interval_seconds=0.1,
+        lease_seconds=1.0,
+        heartbeat_interval_seconds=0.02,
+        shutdown_event=shutdown,
+    )
+    runtime.run_forever()
+    assert heartbeat_updates == [True]
+    with job_factory() as db:
+        assert db.get(Job, first_id).status == JobStatus.COMPLETED
+        assert db.get(Job, second_id).status == JobStatus.QUEUED
 
 
 def test_runtime_rejects_busy_poll_intervals(job_factory):

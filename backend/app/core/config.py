@@ -76,6 +76,12 @@ class Settings(ApplicationSettings):
     worker_poll_interval_seconds: float = Field(
         default=1.0, ge=0.1, allow_inf_nan=False
     )
+    worker_job_lease_seconds: float = Field(
+        default=60.0, gt=0, le=3600, allow_inf_nan=False
+    )
+    worker_heartbeat_interval_seconds: float = Field(
+        default=15.0, gt=0, le=900, allow_inf_nan=False
+    )
     ai_mapping_suggestions_enabled: bool = False
     ai_mapping_provider: Literal["ollama"] = "ollama"
     ai_ollama_base_url: str = "http://localhost:11434"
@@ -98,7 +104,9 @@ class Settings(ApplicationSettings):
         return value.rstrip("/")
 
     @model_validator(mode="after")
-    def validate_cookie_security(self) -> "Settings":
+    def validate_worker_and_cookie_security(self) -> "Settings":
+        if self.worker_heartbeat_interval_seconds >= self.worker_job_lease_seconds:
+            raise ValueError("Worker heartbeat interval must be shorter than the job lease")
         if self.auth_cookie_samesite == "none" and not self.auth_cookie_secure:
             raise ValueError("SameSite=None requires AUTH_COOKIE_SECURE=true")
         return self

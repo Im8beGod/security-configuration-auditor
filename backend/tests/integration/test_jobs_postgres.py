@@ -1,7 +1,7 @@
 """Opt-in durable-queue verification against migrated development PostgreSQL."""
 
 import os
-from datetime import timezone
+from datetime import timedelta, timezone
 
 import pytest
 from sqlalchemy import delete, select, text
@@ -10,7 +10,11 @@ from app.core.config import get_settings
 from app.db.engine import create_database_engine
 from app.db.models import Job, JobStatus, JobType
 from app.db.session import create_session_factory
-from app.jobs.service import claim_next_job, complete_job, enqueue_job, fail_job
+from app.jobs.errors import InvalidJobTransitionError
+from app.jobs.service import claim_next_job, complete_job, enqueue_job, fail_job, heartbeat_job, recover_stale_jobs
+
+
+LEASE_SECONDS = 60.0
 
 
 pytestmark = pytest.mark.skipif(
@@ -34,12 +38,12 @@ def test_postgresql_skip_locked_and_lifecycle():
 
         session_a, session_b = factory(), factory()
         session_a.begin()
-        first = claim_next_job(session_a, {JobType.SYSTEM_NOOP})
+        first = claim_next_job(session_a, {JobType.SYSTEM_NOOP}, lease_owner="postgres-a", lease_seconds=LEASE_SECONDS)
         assert first is not None
 
         session_b.begin()
         session_b.execute(text("SET LOCAL lock_timeout = '1s'"))
-        second = claim_next_job(session_b, {JobType.SYSTEM_NOOP})
+        second = claim_next_job(session_b, {JobType.SYSTEM_NOOP}, lease_owner="postgres-b", lease_seconds=LEASE_SECONDS)
         assert second is not None and second.job_id != first.job_id
         first_id, second_id = first.job_id, second.job_id
         session_b.commit()
@@ -56,22 +60,28 @@ def test_postgresql_skip_locked_and_lifecycle():
             assert all(job.status == JobStatus.PROCESSING for job in claimed)
             assert all(job.attempt_count == 1 for job in claimed)
             assert all(job.started_at is not None for job in claimed)
+            assert {job.lease_owner for job in claimed} == {"postgres-a", "postgres-b"}
 
         with factory.begin() as db:
-            success = claim_next_job(db, {JobType.SYSTEM_NOOP})
+            success = claim_next_job(db, {JobType.SYSTEM_NOOP}, lease_owner="postgres-success", lease_seconds=LEASE_SECONDS)
             assert success is not None
             success_id = success.job_id
+            original_expiry = success.lease_expires_at
         with factory.begin() as db:
-            completed = complete_job(db, success_id)
+            heartbeat = heartbeat_job(db, success_id, lease_owner="postgres-success", lease_seconds=120)
+            assert heartbeat.lease_expires_at > original_expiry
+        with factory.begin() as db:
+            completed = complete_job(db, success_id, lease_owner="postgres-success")
             assert completed.status == JobStatus.COMPLETED
             assert completed.progress == 100
             assert completed.attempt_count == 1
             assert completed.started_at.tzinfo == timezone.utc
             assert completed.completed_at.tzinfo == timezone.utc
             assert completed.error_code is None and completed.error_message is None
+            assert completed.lease_owner is completed.heartbeat_at is completed.lease_expires_at is None
 
         with factory.begin() as db:
-            failure = claim_next_job(db, {JobType.SYSTEM_NOOP})
+            failure = claim_next_job(db, {JobType.SYSTEM_NOOP}, lease_owner="postgres-failure", lease_seconds=LEASE_SECONDS)
             assert failure is not None
             failure.progress = 41
             failure_id = failure.job_id
@@ -79,6 +89,7 @@ def test_postgresql_skip_locked_and_lifecycle():
             failed = fail_job(
                 db,
                 failure_id,
+                lease_owner="postgres-failure",
                 error_code="TEST_CONTROLLED_FAILURE",
                 error_message="intentional integration verification failure",
             )
@@ -89,6 +100,27 @@ def test_postgresql_skip_locked_and_lifecycle():
             assert failed.completed_at.tzinfo == timezone.utc
             assert failed.error_code == "TEST_CONTROLLED_FAILURE"
             assert failed.error_message == "intentional integration verification failure"
+
+        with factory.begin() as db:
+            stale_id = enqueue_job(db, JobType.SYSTEM_NOOP).job_id
+            active_id = enqueue_job(db, JobType.SYSTEM_NOOP).job_id
+            job_ids.extend([stale_id, active_id])
+        with factory.begin() as db:
+            stale = claim_next_job(db, lease_owner="postgres-stale", lease_seconds=LEASE_SECONDS)
+            active = claim_next_job(db, lease_owner="postgres-active", lease_seconds=LEASE_SECONDS)
+            stale.lease_expires_at = stale.heartbeat_at - timedelta(seconds=1)
+        with factory.begin() as db:
+            recovered = recover_stale_jobs(db)
+            assert [job.job_id for job in recovered] == [stale_id]
+        with factory.begin() as db:
+            stale = db.get(Job, stale_id)
+            active = db.get(Job, active_id)
+            assert stale.status == JobStatus.FAILED
+            assert stale.error_code == "worker_lease_expired"
+            assert stale.lease_owner is stale.heartbeat_at is stale.lease_expires_at is None
+            assert active.status == JobStatus.PROCESSING
+            with pytest.raises(InvalidJobTransitionError):
+                complete_job(db, stale_id, lease_owner="postgres-stale")
     finally:
         if session_a is not None:
             session_a.rollback()
@@ -101,5 +133,5 @@ def test_postgresql_skip_locked_and_lifecycle():
                 db.execute(delete(Job).where(Job.job_id.in_(job_ids)))
         with factory() as db:
             assert not db.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0019"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0020"
         engine.dispose()

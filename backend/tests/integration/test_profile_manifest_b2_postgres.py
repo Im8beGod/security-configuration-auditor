@@ -21,7 +21,7 @@ def test_manifest_migration_immutability_tenant_scope_and_review_decision():
     engine = create_database_engine(get_settings())
     factory = create_session_factory(engine)
     with factory.begin() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0019"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0020"
         assert db.scalar(text("""
             SELECT indexname
             FROM pg_indexes

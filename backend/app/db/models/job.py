@@ -23,6 +23,7 @@ class Job(Base):
         CheckConstraint("attempt_count >= 0", name="ck_jobs_attempt_count"),
         CheckConstraint("jsonb_typeof(payload) = 'object'", name="ck_jobs_payload"),
         Index("ix_jobs_queue_claim", "status", "created_at", "job_id"),
+        Index("ix_jobs_stale_recovery", "status", "lease_expires_at"),
     )
 
     job_id: Mapped[UUID] = mapped_column(
@@ -85,5 +86,12 @@ class Job(Base):
         DateTime(timezone=True), nullable=True
     )
     completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

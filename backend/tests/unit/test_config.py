@@ -26,6 +26,8 @@ def test_settings_load_typed_environment_values(
     monkeypatch.setenv("ARTIFACT_STORAGE_PATH", "/tmp/audit-artifacts")
     monkeypatch.setenv("REPORT_STORAGE_PATH", "/tmp/audit-reports")
     monkeypatch.setenv("WORKER_POLL_INTERVAL_SECONDS", "2.5")
+    monkeypatch.setenv("WORKER_JOB_LEASE_SECONDS", "120")
+    monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "30")
     monkeypatch.setenv("ARTIFACT_MAX_UPLOAD_BYTES", "12345")
     monkeypatch.setenv("ARTIFACT_MAX_BULK_FILES", "7")
 
@@ -41,6 +43,8 @@ def test_settings_load_typed_environment_values(
     assert settings.artifact_storage_path == Path("/tmp/audit-artifacts")
     assert settings.report_storage_path == Path("/tmp/audit-reports")
     assert settings.worker_poll_interval_seconds == 2.5
+    assert settings.worker_job_lease_seconds == 120
+    assert settings.worker_heartbeat_interval_seconds == 30
     assert settings.artifact_max_upload_bytes == 12345
     assert settings.artifact_max_bulk_files == 7
     assert isinstance(settings.worker_poll_interval_seconds, float)
@@ -153,7 +157,13 @@ def test_application_settings_require_no_secrets(monkeypatch):
 
 def test_worker_poll_interval_default_and_validation(auth_settings):
     assert auth_settings.worker_poll_interval_seconds == 1.0
+    assert auth_settings.worker_job_lease_seconds == 60.0
+    assert auth_settings.worker_heartbeat_interval_seconds == 15.0
     values = auth_settings.model_dump()
     values["worker_poll_interval_seconds"] = 0.05
     with pytest.raises(ValidationError):
+        Settings(**values)
+    values = auth_settings.model_dump()
+    values.update(worker_job_lease_seconds=30, worker_heartbeat_interval_seconds=30)
+    with pytest.raises(ValidationError, match="heartbeat interval"):
         Settings(**values)

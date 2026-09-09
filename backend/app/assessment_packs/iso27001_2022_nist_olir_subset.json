@@ -1,0 +1,10 @@
+{
+  "iso_open_data": {"source_url": "https://www.iso.org/open-data.html", "reference": "ISO/IEC 27001:2022", "title": "Information security, cybersecurity and privacy protection — Information security management systems — Requirements", "edition": 3, "publication_date": "2022-10-25", "status": "published", "amendment": {"reference": "ISO/IEC 27001:2022/Amd 1:2024", "publication_date": "2024-02-23", "status": "published"}},
+  "olir": {"name": "800-53-Rev5-to-ISO 27001-2022 Informative Reference", "version": "1.0.0", "focal_document_version": "SP 800-53 Rev 5.1.1", "source_url": "https://csrc.nist.gov/projects/olir/informative-reference-catalog/details?referenceId=155", "artifact_filename": "sp800-53r5-to-iso-27001-mapping-2022-OLIR-2023-10-12-UPDATED.xlsx", "sha3_256": "E631DE234A1FAC057991773F015C221226940540F5602E1B70A3768EAFF5CBD9", "retrieved_at": "2026-09-09"},
+  "relationships": [
+    {"nist_control_id": "AC-11", "olir_focal_element_id": "AC-11", "iso_annex_a_id": "A.7.7"},
+    {"nist_control_id": "AC-17", "olir_focal_element_id": "AC-17", "iso_annex_a_id": "A.5.14"},
+    {"nist_control_id": "AU-8", "olir_focal_element_id": "AU-08", "iso_annex_a_id": "A.8.17"},
+    {"nist_control_id": "AU-12", "olir_focal_element_id": "AU-12", "iso_annex_a_id": "A.8.15"}
+  ]
+}

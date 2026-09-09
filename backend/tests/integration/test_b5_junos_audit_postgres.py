@@ -49,7 +49,7 @@ def test_b5_junos_audit_persists_scoped_semantics_through_normal_workflow(tmp_pa
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0016"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0017"
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(
             factory, "B5 Junos E2E", f"b5-junos-{suffix}",

@@ -53,7 +53,7 @@ def test_b8_cis_pack_is_immutable_profile_constrained_and_persists_honest_verdic
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(factory, "B8 CIS Organization", f"b8-{suffix}", f"b8-{suffix}@example.invalid", "test-only-password")
         with factory() as db:
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0016"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0017"
             cis = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "cis_cisco_ios_xe_17_v2_2_1_scoped_technical"))
             nist = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "nist_sp80053_rev5_scoped_technical"))
             disa = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "disa_ndm_srg_v5r5_scoped_technical"))

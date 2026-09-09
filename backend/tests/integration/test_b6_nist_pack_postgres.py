@@ -47,7 +47,7 @@ def test_b6_nist_pack_is_pinned_and_evaluates_shared_canonical_states_for_three_
                 db.execute(text("UPDATE assessment_pack_versions SET name = 'mutation' WHERE assessment_pack_version_id = :pack_id").bindparams(pack_id=pack.assessment_pack_version_id))
             db.rollback()
         with factory.begin() as db:
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0015"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0016"
             pack = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "nist_sp80053_rev5_scoped_technical"))
             assert pack is not None and pack.version == 1 and pack.status == "published"
             assert pack.profile_version_ids == list(PROFILES)

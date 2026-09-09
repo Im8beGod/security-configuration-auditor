@@ -1,0 +1,22 @@
+{
+  "benchmark_title": "CIS Cisco IOS XE 17.x Benchmark",
+  "version": "2.2.1",
+  "release_date": "2025-07-17",
+  "retrieved_at": "2026-09-09",
+  "official_source_url": "https://www.cisecurity.org/benchmark/cisco",
+  "artifact_filename": "CIS_Cisco_IOS_XE_17.x_Benchmark_v2.2.1.pdf",
+  "source_sha256": "e5330afdf64cc7a44ba051733e7b3a5b835d7d341610dddb5d5292eabe126b25",
+  "recommendations": [
+    {"id": "1.2.2", "level": "Level 1", "cis_assessment_status": "Automated", "page": 41},
+    {"id": "1.2.5", "level": "Level 1", "cis_assessment_status": "Automated", "page": 47},
+    {"id": "1.2.8", "level": "Level 1", "cis_assessment_status": "Automated", "page": 53},
+    {"id": "2.1.1.2", "level": "Level 1", "cis_assessment_status": "Manual", "page": 107},
+    {"id": "2.2.1", "level": "Level 1", "cis_assessment_status": "Automated", "page": 122},
+    {"id": "2.2.4", "level": "Level 1", "cis_assessment_status": "Automated", "page": 128},
+    {"id": "2.3.1.1", "level": "Level 1", "cis_assessment_status": "Automated", "page": 139},
+    {"id": "2.3.1.2", "level": "Level 1", "cis_assessment_status": "Automated", "page": 141},
+    {"id": "2.3.1.3", "level": "Level 1", "cis_assessment_status": "Automated", "page": 143},
+    {"id": "2.3.1.4", "level": "Level 2", "cis_assessment_status": "Manual", "page": 145},
+    {"id": "2.3.2", "level": "Level 1", "cis_assessment_status": "Automated", "page": 147}
+  ]
+}

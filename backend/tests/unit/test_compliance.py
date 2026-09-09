@@ -55,7 +55,7 @@ def test_bounded_rules_produce_expected_verdicts(rule_id, value, expected):
 
 
 def test_registry_is_versioned_immutable_and_fails_closed():
-    assert len(RULE_PACK.rules) == 11
+    assert len(RULE_PACK.rules) == 12
     assert RuleRegistry().get(RULE_PACK.rule_pack_version_id) is RULE_PACK
     with pytest.raises(RuleRegistryError, match="unavailable"):
         RuleRegistry().get(uuid4())

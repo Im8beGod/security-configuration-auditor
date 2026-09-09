@@ -59,6 +59,7 @@ RULES = (
     _rule("management.telnet.disabled", "Telnet management access disabled", "management", FindingSeverity.HIGH, "management.remote.telnet.enabled", "equals", False, framework_references=(_nist("AC-17"),)),
     _rule("management.ssh.enabled", "SSH management access enabled", "management", FindingSeverity.HIGH, "management.remote.ssh.enabled", "equals", True, framework_references=(_nist("AC-17"),)),
     _rule("management.ssh.version_2", "SSH protocol version 2 required", "management", FindingSeverity.MEDIUM, "management.remote.ssh.version", "equals", 2, framework_references=(_nist("AC-17"),)),
+    _rule("management.source.restriction.configured", "Management source restriction configured", "management", FindingSeverity.MEDIUM, "management.remote.source.restriction.configured", "equals", True),
     _rule("management.idle_timeout.maximum", "Administrative idle timeout within organization maximum", "management", FindingSeverity.MEDIUM, "management.session.idle_timeout", "less_than_or_equal", parameter="maximum_admin_idle_timeout_seconds", framework_references=(_nist("AC-11"),)),
     _rule("logging.enabled", "Configuration logging enabled", "logging", FindingSeverity.MEDIUM, "logging.enabled", "equals", True, framework_references=(_nist("AU-12"),)),
     _rule("logging.remote.destination.configured", "Remote logging destination configured", "logging", FindingSeverity.MEDIUM, "logging.remote.destination", "non_empty", framework_references=(_nist("AU-12"),)),

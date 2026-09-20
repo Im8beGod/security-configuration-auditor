@@ -309,6 +309,7 @@ class AuditPipelineCoordinator:
             os_version=data.get("os_version"), model=data.get("model"), serial_number=data.get("serial_number"),
             device_class=None, selected_profile_id=profile_id, selected_profile_version_id=profile_version_id,
             confidence=confidence, resolution_status=status, supporting_signals=(), unresolved_reasons=(), conflicts=(),
+            metadata=dict(data.get("metadata") or {}),
         )
 
     def _begin_processing(self, audit_id: UUID, organization_id: UUID) -> None:

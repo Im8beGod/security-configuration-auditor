@@ -68,7 +68,9 @@ def _finding(audit, key, *, verdict=FindingVerdict.FAIL, severity=FindingSeverit
 def _cleanup(db, organization_ids):
     audit_ids = select(Audit.audit_id).where(Audit.organization_id.in_(organization_ids))
     db.execute(delete(Finding).where(Finding.audit_id.in_(audit_ids)))
-    db.execute(delete(RemediationProcedure))
+    db.execute(text("ALTER TABLE remediation_procedures DISABLE TRIGGER trg_remediation_published_immutable"))
+    db.execute(delete(RemediationProcedure).where(RemediationProcedure.procedure_key.like("test.%")))
+    db.execute(text("ALTER TABLE remediation_procedures ENABLE TRIGGER trg_remediation_published_immutable"))
     db.execute(delete(EffectiveState).where(EffectiveState.audit_id.in_(audit_ids)))
     db.execute(delete(SecurityFact).where(SecurityFact.audit_id.in_(audit_ids)))
     db.execute(delete(Audit).where(Audit.organization_id.in_(organization_ids)))
@@ -82,9 +84,12 @@ def _cleanup(db, organization_ids):
 def _procedure(rule_id, *, status=RemediationProcedureStatus.PUBLISHED, profile="cisco.ios_xe.17@1.0.0"):
     return RemediationProcedure(procedure_key=f"test.{uuid4()}", version=1, rule_id=rule_id,
         title="Synthetic recommendation", security_objective="test", description="test only", status=status,
-        profile_applicability={"profile_version_ids": [profile]}, prerequisites=[], safety_warnings=[],
+        profile_applicability={"profile_version_ids": [profile]},
+        prerequisites=[{"text": "Synthetic prerequisite"}], safety_warnings=["Synthetic warning"],
         required_parameters=[{"name": "network", "type": "ip_network", "required": True}], configuration_context=[],
-        ordered_steps=[{"text": "synthetic network {network}"}], verification_steps=[], rollback_steps=[],
+        ordered_steps=[{"text": "synthetic network {network}"}],
+        verification_steps=[{"text": "verify network {network}"}],
+        rollback_steps=[{"text": "rollback network {network}"}],
         validation_results=[{"result": "synthetic"}], source_references=[{"source": "synthetic"}])
 
 
@@ -160,7 +165,7 @@ def test_findings_read_api_preserves_canonical_values_and_fails_closed(tmp_path)
     organization_ids = []
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(factory, "Step 8 Read", f"step8-read-{suffix}", f"step8-read-{suffix}@example.invalid", "test-only-password")
         other_organization_id, _ = bootstrap_admin(factory, "Step 8 Other", f"step8-other-{suffix}", f"step8-other-{suffix}@example.invalid", "test-only-password")

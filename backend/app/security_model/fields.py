@@ -53,6 +53,14 @@ _FIELDS = (
         False,
     ),
     CanonicalField(
+        "management.remote.http.enabled",
+        frozenset({TypedValueType.BOOLEAN}),
+        frozenset({"interface", "device"}),
+        "management",
+        "Whether clear-text HTTP administrative access is explicitly enabled.",
+        False,
+    ),
+    CanonicalField(
         "management.remote.tls.minimum_version",
         frozenset({TypedValueType.ENUM}),
         frozenset({"device"}),
@@ -63,9 +71,17 @@ _FIELDS = (
     CanonicalField(
         "management.remote.source.restriction.configured",
         frozenset({TypedValueType.BOOLEAN}),
-        frozenset({"vty_range", "administrator"}),
+        frozenset({"vty_range", "administrator", "management_service"}),
         "management",
         "Whether an explicit management-source restriction is configured in its native scope.",
+        False,
+    ),
+    CanonicalField(
+        "management.remote.ssh.strong_crypto.configured",
+        frozenset({TypedValueType.BOOLEAN}),
+        frozenset({"device"}),
+        "management",
+        "Whether supported evidence explicitly establishes strong SSH cryptographic settings.",
         False,
     ),
     CanonicalField(
@@ -98,6 +114,14 @@ _FIELDS = (
         frozenset({"device"}),
         "logging",
         "Whether logging is explicitly enabled by configuration evidence.",
+        False,
+    ),
+    CanonicalField(
+        "logging.administrative_access.enabled",
+        frozenset({TypedValueType.BOOLEAN}),
+        frozenset({"device"}),
+        "logging",
+        "Whether supported evidence explicitly establishes administrative access logging.",
         False,
     ),
     CanonicalField(

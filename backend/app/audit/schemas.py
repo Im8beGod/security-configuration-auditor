@@ -110,6 +110,7 @@ class AuditResponse(BaseModel):
     schema_version: str
     job: JobSummary | None = None
     assessment: dict[str, object] | None = None
+    assessments: list[dict[str, object]] = Field(default_factory=list)
 
 
 class ReevaluationRequest(BaseModel):

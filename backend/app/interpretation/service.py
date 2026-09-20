@@ -28,7 +28,7 @@ from app.db.models import (
     MappingVersion,
     MappingStatus,
 )
-from app.ingestion.storage import ArtifactStorage
+from app.ingestion.storage import ArtifactStorage, ArtifactStorageError
 from app.interpretation.exceptions import (
     InterpretationInfrastructureError,
     InterpretationNotFoundError,
@@ -38,6 +38,7 @@ from app.interpretation.extractors import EXTRACTORS, ExtractionOutcome
 from app.interpretation.knowledge_pack import (
     DeclarativeMapping,
     KnowledgePack,
+    KnowledgePackRegistry,
     NegationBehavior,
     NodeMatcher,
     validate_knowledge_pack,
@@ -60,7 +61,14 @@ from app.knowledge_packs.fortios_7 import (
     FORTIOS_7_KNOWLEDGE_PACK,
     FORTIOS_7_KNOWLEDGE_PACK_V1,
     FORTIOS_7_KNOWLEDGE_PACK_V1_1,
+    FORTIOS_7_KNOWLEDGE_PACK_V1_2,
 )
+from app.knowledge_packs.juniper_junos_18 import (
+    JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+    JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
+)
+from app.knowledge_packs.arista_eos_4 import ARISTA_EOS_4_KNOWLEDGE_PACK
+from app.knowledge_packs.generic_cli import GENERIC_CLI_KNOWLEDGE_PACK
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
 from app.parsing.readers.xml_tree import XmlStructuralIR, XmlNode
 from app.parsing.exceptions import (
@@ -82,38 +90,38 @@ from app.security_model import (
 from app.training.dsl import MappingDefinition, ValidationNode, extract as extract_training, matches as matches_training, matches_xml, xml_match_has_unsupported_qualifier
 
 
-KNOWLEDGE_PACKS = {
-    CISCO_IOS_XE_17_KNOWLEDGE_PACK.profile_version_id: CISCO_IOS_XE_17_KNOWLEDGE_PACK,
-}
-KNOWLEDGE_PACKS_BY_VERSION = {
-    pack.knowledge_pack_version_id: pack
-    for pack in (
+KNOWLEDGE_PACK_REGISTRY = KnowledgePackRegistry(
+    (
         CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1,
         CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1,
         CISCO_IOS_XE_17_KNOWLEDGE_PACK,
         FORTIOS_7_KNOWLEDGE_PACK_V1,
         FORTIOS_7_KNOWLEDGE_PACK_V1_1,
+        FORTIOS_7_KNOWLEDGE_PACK_V1_2,
         FORTIOS_7_KNOWLEDGE_PACK,
-    )
-}
-
-
-def _junos_pack():
-    from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK
-    return JUNIPER_JUNOS_18_KNOWLEDGE_PACK
-
-
-def _fortios_pack():
-    return FORTIOS_7_KNOWLEDGE_PACK
+        JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
+        JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+        ARISTA_EOS_4_KNOWLEDGE_PACK,
+        GENERIC_CLI_KNOWLEDGE_PACK,
+    ),
+    active_by_profile={
+        CISCO_IOS_XE_17_KNOWLEDGE_PACK.profile_version_id:
+            CISCO_IOS_XE_17_KNOWLEDGE_PACK.knowledge_pack_version_id,
+        FORTIOS_7_KNOWLEDGE_PACK.profile_version_id:
+            FORTIOS_7_KNOWLEDGE_PACK.knowledge_pack_version_id,
+        JUNIPER_JUNOS_18_KNOWLEDGE_PACK.profile_version_id:
+            JUNIPER_JUNOS_18_KNOWLEDGE_PACK.knowledge_pack_version_id,
+        ARISTA_EOS_4_KNOWLEDGE_PACK.profile_version_id:
+            ARISTA_EOS_4_KNOWLEDGE_PACK.knowledge_pack_version_id,
+        GENERIC_CLI_KNOWLEDGE_PACK.profile_version_id:
+            GENERIC_CLI_KNOWLEDGE_PACK.knowledge_pack_version_id,
+    },
+)
 
 
 def load_validated_knowledge_pack(profile_version_id: str) -> KnowledgePack:
     profile = PROFILE_REGISTRY.get(profile_version_id)
-    pack = KNOWLEDGE_PACKS.get(profile_version_id)
-    if pack is None and profile_version_id == "juniper.junos.18@1.0.0":
-        pack = _junos_pack()
-    if pack is None and profile_version_id == "fortinet.fortios.7@1.0.0":
-        pack = _fortios_pack()
+    pack = KNOWLEDGE_PACK_REGISTRY.active_for_profile(profile_version_id)
     if (
         profile is None
         or pack is None
@@ -140,13 +148,7 @@ def load_validated_knowledge_pack_by_version(
     knowledge_pack_version_id: UUID,
 ) -> KnowledgePack:
     """Load an immutable historical pack by its exact pinned identity."""
-    pack = KNOWLEDGE_PACKS_BY_VERSION.get(knowledge_pack_version_id)
-    if pack is None and knowledge_pack_version_id in {
-        UUID("b3040000-0000-5000-8000-000000000018"),
-        UUID("b3050000-0000-5000-8000-000000000018"),
-    }:
-        from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1
-        pack = JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1 if knowledge_pack_version_id == JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1.knowledge_pack_version_id else _junos_pack()
+    pack = KNOWLEDGE_PACK_REGISTRY.get(knowledge_pack_version_id)
     if pack is None:
         raise InterpretationValidationError(
             "knowledge_pack_unavailable", "No compatible knowledge pack is available"
@@ -313,6 +315,10 @@ def interpret_structural_ir(
         ) from None
 
     statements = [node for node in ir.nodes if node.kind == ConfigNodeKind.STATEMENT]
+    evidence_nodes = [
+        node for node in ir.nodes
+        if node.kind in {ConfigNodeKind.STATEMENT, ConfigNodeKind.OPAQUE}
+    ]
     facts: list[SecurityFactDraft] = []
     diagnostics: list[InterpretationDiagnostic] = []
     diagnostic_keys: set[tuple[str, str | None, UUID | None]] = set()
@@ -387,16 +393,19 @@ def interpret_structural_ir(
             matched_node_ids.add(node.node_id)
 
     metrics = InterpretationMetrics(
-        nodes_considered=len(statements),
+        nodes_considered=len(evidence_nodes),
         nodes_matched=len(matched_node_ids),
         mappings_applied=len(facts),
         facts_produced=len(facts),
-        unmatched_nodes=len(statements) - len(matched_node_ids),
+        unmatched_nodes=len(evidence_nodes) - len(matched_node_ids),
         unsupported_cases=len(diagnostics),
     )
     return InterpretationResult(
         facts=tuple(facts), diagnostics=tuple(diagnostics), metrics=metrics,
-        unresolved_node_ids=tuple(node.node_id for node in statements if node.node_id not in matched_node_ids),
+        unresolved_node_ids=tuple(
+            node.node_id for node in evidence_nodes
+            if node.node_id not in matched_node_ids
+        ),
     )
 
 
@@ -543,6 +552,36 @@ def interpret_audit(
         )
 
     expected_profile_resolution = dict(audit.profile_resolution)
+    identity_artifact_ids = {
+        item["artifact_id"]
+        for values in expected_profile_resolution.get("identity_provenance", {}).values()
+        for item in values
+        if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+    }
+    unsupported_artifacts: list[tuple[Artifact, str]] = []
+    selected_artifact_ids = {artifact.artifact_id for artifact in evidence_artifacts}
+    for artifact in artifacts:
+        configuration_like = artifact.evidence_type in {
+            ArtifactEvidenceType.CONFIGURATION,
+            ArtifactEvidenceType.STRUCTURED_EXPORT,
+        } or (
+            artifact.evidence_type is ArtifactEvidenceType.UNKNOWN_EVIDENCE
+            and str(artifact.artifact_id) not in identity_artifact_ids
+        )
+        if artifact.evidence_type is ArtifactEvidenceType.STRUCTURED_EXPORT:
+            filename = artifact.original_filename.lower()
+            configuration_like = any(
+                marker in filename for marker in ("config", "running", "startup")
+            )
+        if not configuration_like or artifact.artifact_id in selected_artifact_ids:
+            continue
+        try:
+            preview = storage.read_prefix(artifact.storage_reference, 2048).decode(
+                artifact.encoding or "utf-8", errors="replace"
+            )
+        except (ArtifactStorageError, LookupError):
+            preview = artifact.original_filename
+        unsupported_artifacts.append((artifact, preview[:2048]))
     expected_evidence = tuple(
         (artifact.artifact_id, artifact.sha256) for artifact in artifacts
     )
@@ -556,7 +595,12 @@ def interpret_audit(
     db.rollback()
 
     parsed_irs: list[StructuralIR | XmlStructuralIR] = []
-    artifact_diagnostics: list[ArtifactInterpretationDiagnostic] = []
+    artifact_diagnostics: list[ArtifactInterpretationDiagnostic] = [
+        ArtifactInterpretationDiagnostic(
+            artifact.artifact_id, "unsupported_configuration_evidence"
+        )
+        for artifact, _preview in unsupported_artifacts
+    ]
     for artifact in evidence_artifacts:
         try:
             parsed_irs.append(parse_artifact(
@@ -657,6 +701,8 @@ def interpret_audit(
             profile_version_id=profile_version_id,
             parsed_irs=parsed_irs,
             results=artifact_results,
+            knowledge_pack=pack,
+            unsupported_artifacts=unsupported_artifacts,
         )
         db.commit()
     except SQLAlchemyError:
@@ -698,13 +744,10 @@ def list_audit_security_facts(
 
 def _matches(mapping: DeclarativeMapping, node: ConfigNode, ir: StructuralIR) -> bool:
     if mapping.training_definition is not None:
-        parent = ir.node(node.parent_id) if node.parent_id else None
         definition = MappingDefinition.model_validate(mapping.training_definition)
-        return matches_training(definition, ValidationNode.model_validate({
-            "command": node.command, "arguments": list(node.arguments),
-            "parent_command": parent.command if parent else None, "ancestor_commands": [],
-            "scope_type": mapping.scope_resolver, "negated": node.negated,
-        }))[0]
+        return matches_training(
+            definition, _training_validation_node(node, ir, mapping.scope_resolver)
+        )[0]
     matcher = mapping.matcher
     if node.command != matcher.command or not _has_prefix(
         node.arguments, matcher.arguments_prefix
@@ -742,17 +785,34 @@ def _has_prefix(arguments: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
 def _extract_mapping(mapping: DeclarativeMapping, node: ConfigNode, ir: StructuralIR):
     if mapping.training_definition is None:
         return EXTRACTORS[mapping.extractor](node)
-    parent = ir.node(node.parent_id) if node.parent_id else None
     definition = MappingDefinition.model_validate(mapping.training_definition)
-    matched, captures = matches_training(definition, ValidationNode.model_validate({
-        "command": node.command, "arguments": list(node.arguments),
-        "parent_command": parent.command if parent else None, "ancestor_commands": [],
-        "scope_type": mapping.scope_resolver, "negated": node.negated,
-    }))
+    matched, captures = matches_training(
+        definition, _training_validation_node(node, ir, mapping.scope_resolver)
+    )
     if not matched:
         return ExtractionOutcome(None, "training_mapping_mismatch")
     value = extract_training(definition, captures)
     return ExtractionOutcome(TypedValue(TypedValueType(definition.value_extraction.output_type), value))
+
+
+def _training_validation_node(
+    node: ConfigNode, ir: StructuralIR, scope_type: str
+) -> ValidationNode:
+    parent = ir.node(node.parent_id) if node.parent_id else None
+    ancestors: list[str] = []
+    ancestor = parent
+    while ancestor is not None and len(ancestors) < 8:
+        if ancestor.command:
+            ancestors.append(ancestor.command)
+        ancestor = ir.node(ancestor.parent_id) if ancestor.parent_id else None
+    return ValidationNode.model_validate({
+        "command": node.command,
+        "arguments": list(node.arguments),
+        "parent_command": parent.command if parent else None,
+        "ancestor_commands": ancestors,
+        "scope_type": scope_type,
+        "negated": node.negated,
+    })
 
 
 def _build_fact(
@@ -873,6 +933,18 @@ def _build_negated_fact(
             source_nodes=source_nodes,
             mapping_version_id=mapping.removal_mapping_version_id,
         )
+    if behavior is NegationBehavior.INVERT_BOOLEAN:
+        extraction = EXTRACTORS[mapping.extractor](node)
+        if extraction.value is None or extraction.value.type is not TypedValueType.BOOLEAN:
+            return None
+        return _build_fact(
+            context=context, ir=ir, pack=pack, mapping=mapping,
+            value=TypedValue(
+                TypedValueType.BOOLEAN, not extraction.value.value,
+                original_value=extraction.value.original_value,
+            ),
+            scope=scope_outcome.scope, source_nodes=source_nodes,
+        )
     return None
 
 
@@ -909,9 +981,25 @@ def _persist_unresolved_blocks(
     profile_version_id: str,
     parsed_irs: list[StructuralIR | XmlStructuralIR],
     results: list[InterpretationResult],
+    knowledge_pack: KnowledgePack,
+    unsupported_artifacts: list[tuple[Artifact, str]],
 ) -> None:
+    from app.compliance.rule_registry import RULE_PACK_BY_PROFILE
+
+    rule_pack = RULE_PACK_BY_PROFILE.get(profile_version_id)
+    rules = () if rule_pack is None else rule_pack.rules
+    all_field_ids = sorted({
+        field_id for rule in rules for field_id in rule.required_effective_states
+    })
+    all_rule_ids = sorted(rule.rule_id for rule in rules)
+    mapping_fields = {
+        mapping.mapping_id: mapping.field_id for mapping in knowledge_pack.mappings
+    }
     for ir, result in zip(parsed_irs, results, strict=True):
-        diagnostics = {item.node_id: item.code for item in result.diagnostics if item.node_id}
+        diagnostics: dict[str, list[InterpretationDiagnostic]] = {}
+        for diagnostic in result.diagnostics:
+            if diagnostic.node_id:
+                diagnostics.setdefault(diagnostic.node_id, []).append(diagnostic)
         nodes = {node.node_id: node for node in ir.nodes}
         for node_id in result.unresolved_node_ids:
             node = nodes[node_id]
@@ -928,6 +1016,23 @@ def _persist_unresolved_blocks(
             ))
             if exists is not None:
                 continue
+            node_diagnostics = diagnostics.get(node.node_id, [])
+            candidate_field_ids = sorted({
+                mapping_fields[item.mapping_id]
+                for item in node_diagnostics
+                if item.mapping_id in mapping_fields
+            })
+            affected_rule_ids = sorted({
+                rule.rule_id for rule in rules
+                if set(rule.required_effective_states) & set(candidate_field_ids)
+            })
+            if (
+                isinstance(ir, StructuralIR)
+                and node.kind is ConfigNodeKind.OPAQUE
+                and node.parse_status is not ParseStatus.OPAQUE
+            ):
+                candidate_field_ids = all_field_ids
+                affected_rule_ids = all_rule_ids
             nearby = sorted(ir.nodes, key=lambda item: item.order)
             position = next(index for index, item in enumerate(nearby) if item.node_id == node.node_id)
             context_text = "\n".join(
@@ -958,12 +1063,51 @@ def _persist_unresolved_blocks(
                 }],
                 raw_text=raw_text,
                 surrounding_context=context_text,
-                unknown_reason=diagnostics.get(node.node_id, "unmapped_syntax"),
-                candidate_field_ids=[],
-                affected_rule_ids=[],
+                unknown_reason=(
+                    node_diagnostics[0].code
+                    if node_diagnostics else "unmapped_syntax"
+                ),
+                candidate_field_ids=candidate_field_ids,
+                affected_rule_ids=affected_rule_ids,
                 fingerprint=fingerprint,
                 occurrence=occurrence,
             ))
+
+    for artifact, raw_text in unsupported_artifacts:
+        identity = f"{context.audit_id}:{artifact.artifact_id}:unsupported-artifact"
+        fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+        exists = db.scalar(select(UnresolvedBlock.unresolved_block_id).where(
+            UnresolvedBlock.audit_id == context.audit_id,
+            UnresolvedBlock.fingerprint == fingerprint,
+        ))
+        if exists is not None:
+            continue
+        db.add(UnresolvedBlock(
+            organization_id=organization_id,
+            audit_id=context.audit_id,
+            device_id=context.device_id,
+            snapshot_id=context.snapshot_id,
+            profile_id=profile_id,
+            profile_version_id=profile_version_id,
+            source_ir_node_ids=[],
+            evidence_refs=[{
+                "artifact_id": str(artifact.artifact_id),
+                "source_path": artifact.original_filename,
+                "evidence_type": artifact.evidence_type.value,
+            }],
+            raw_text=raw_text,
+            surrounding_context="",
+            unknown_reason="unsupported_configuration_evidence",
+            candidate_field_ids=all_field_ids,
+            affected_rule_ids=all_rule_ids,
+            fingerprint=fingerprint,
+            occurrence={
+                "artifact_id": str(artifact.artifact_id),
+                "filename": artifact.original_filename,
+                "evidence_type": artifact.evidence_type.value,
+                "sha256": artifact.sha256,
+            },
+        ))
 
 
 def _add_diagnostic(

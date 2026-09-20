@@ -80,7 +80,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         with engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260909_0017"
+            ) == "20260920_0023"
 
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
@@ -295,7 +295,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
         # Two logging facts resolve into one canonical repeatable collection.
         assert len(first_effective_state_ids) == 15
         first_finding_ids = {finding.finding_id for finding in first.findings}
-        assert len(first_finding_ids) == 11
+        assert len(first_finding_ids) == 20
 
         with factory() as db:
             persisted = db.get(Audit, audit_id)
@@ -305,7 +305,7 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
             assert started_at is not None and persisted.completed_at is not None
             assert persisted.version_refs["device_profile_version_id"] == CISCO_IOS_XE_17.profile_version_id
             assert persisted.version_refs["knowledge_pack_version_id"] == str(CISCO_IOS_XE_17_KNOWLEDGE_PACK.knowledge_pack_version_id)
-            assert persisted.version_refs["rule_pack_versions"] == ["e3763b76-edcd-55b8-9825-b82933a3e2f9"]
+            assert persisted.version_refs["rule_pack_versions"] == ["49931437-aa51-54dc-a454-43720ce9ca1e"]
             assert persisted.version_refs["organization_policy_version_id"]
             assert persisted.verdict_counts
             assert persisted.severity_counts
@@ -353,8 +353,9 @@ def test_complete_step5_pipeline_is_bounded_versioned_and_idempotent(
             assert all(state.source_fact_ids for state in states)
             findings = list(db.scalars(select(Finding).where(Finding.audit_id == audit_id)))
             assert {finding.finding_id for finding in findings} == first_finding_ids
-            assert {str(finding.rule_pack_version_id) for finding in findings} == {"e3763b76-edcd-55b8-9825-b82933a3e2f9"}
-            assert all(finding.evidence_refs == [] and finding.remediation_procedure_id is None for finding in findings)
+            assert {str(finding.rule_pack_version_id) for finding in findings} == {"49931437-aa51-54dc-a454-43720ce9ca1e"}
+            assert all(finding.remediation_procedure_id is None for finding in findings)
+            assert any(finding.evidence_refs for finding in findings)
             unrelated = db.get(Job, unrelated_job_id)
             assert unrelated.status == JobStatus.QUEUED
             assert unrelated.attempt_count == 0

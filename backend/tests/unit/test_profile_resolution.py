@@ -10,8 +10,10 @@ from app.db.models import (
 )
 from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.profile_resolution import (
+    ARISTA_EOS_4,
     CISCO_IOS_XE_17,
     FORTIOS_7,
+    GENERIC_CLI,
     JUNIPER_JUNOS_18,
     MAX_ARTIFACT_INSPECTION_BYTES,
     PROFILE_REGISTRY,
@@ -62,6 +64,8 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "cisco.ios_xe.17@1.0.0": CISCO_IOS_XE_17,
         "fortinet.fortios.7@1.0.0": FORTIOS_7,
         "juniper.junos.18@1.0.0": JUNIPER_JUNOS_18,
+        "arista.eos.4@1.0.0": ARISTA_EOS_4,
+        "generic.cli@1.0.0": GENERIC_CLI,
     }
     assert CISCO_IOS_XE_17.profile_id == "cisco.ios_xe.17"
     assert CISCO_IOS_XE_17.profile_version == "1.0.0"
@@ -325,7 +329,7 @@ def test_persisted_shape_is_canonical_and_does_not_include_raw_or_diagnostics():
     assert set(persisted) == {
         "profile_id", "profile_version_id", "vendor", "product_family", "os",
         "os_version", "model", "serial_number", "confidence", "resolution_status",
-        "identity_provenance", "conflicts",
+        "identity_provenance", "conflicts", "metadata",
     }
     assert "Cisco IOS XE Software" not in str(persisted)
     assert "supporting_signals" not in persisted

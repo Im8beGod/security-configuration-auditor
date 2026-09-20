@@ -1,7 +1,8 @@
 import re
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Literal, Mapping
+from collections.abc import Iterator, Mapping
+from typing import Literal
 
 from app.db.models import ArtifactEvidenceType, DeviceClass
 
@@ -59,6 +60,52 @@ class ProfileManifest:
         if version is None:
             return "version_unknown"
         return "compatible" if self.version_constraint.accepts(version) and version not in self.exclusions else "incompatible"
+
+
+class ProfileManifestRegistry(Mapping[str, ProfileManifest]):
+    """Immutable exact-version registry for built-in device profiles."""
+
+    SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0"})
+
+    def __init__(self, manifests: tuple[ProfileManifest, ...]) -> None:
+        by_version: dict[str, ProfileManifest] = {}
+        logical_versions: dict[tuple[str, str], ProfileManifest] = {}
+        for manifest in manifests:
+            self._validate(manifest)
+            existing = by_version.get(manifest.profile_version_id)
+            logical = logical_versions.get((manifest.profile_id, manifest.profile_version))
+            if (existing is not None and existing != manifest) or (
+                logical is not None and logical != manifest
+            ):
+                raise ValueError("Profile manifest version content conflicts")
+            by_version[manifest.profile_version_id] = manifest
+            logical_versions[(manifest.profile_id, manifest.profile_version)] = manifest
+        self._by_version = MappingProxyType(by_version)
+
+    def __getitem__(self, profile_version_id: str) -> ProfileManifest:
+        return self._by_version[profile_version_id]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._by_version)
+
+    def __len__(self) -> int:
+        return len(self._by_version)
+
+    @classmethod
+    def _validate(cls, manifest: ProfileManifest) -> None:
+        if manifest.manifest_schema_version not in cls.SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError("Unsupported profile-manifest schema version")
+        if (
+            not manifest.profile_id.strip()
+            or not manifest.profile_version.strip()
+            or manifest.profile_version_id
+            != f"{manifest.profile_id}@{manifest.profile_version}"
+        ):
+            raise ValueError("Profile manifest identity is malformed")
+        if not manifest.vendor.strip() or not manifest.os.strip() or not manifest.device_classes:
+            raise ValueError("Profile manifest is malformed")
+        if manifest.structural_reader_name is None or manifest.knowledge_pack_name is None:
+            raise ValueError("Profile manifest bindings are incomplete")
 
 
 @dataclass(frozen=True)
@@ -168,7 +215,7 @@ FORTIOS_7 = ProfileManifest(
     device_classes=frozenset({DeviceClass.FIREWALL}),
     accepted_evidence_types=frozenset(ArtifactEvidenceType),
     structural_reader_name="fortios_cli.v1",
-    knowledge_pack_name="fortios_7@1.2.0",
+    knowledge_pack_name="fortios_7@1.3.0",
     capabilities=frozenset({
         "profile_detection", "structural_parsing", "semantic_interpretation",
         "effective_state_resolution", "deterministic_compliance",
@@ -223,10 +270,78 @@ JUNIPER_JUNOS_18 = ProfileManifest(
     structural_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
 )
 
-PROFILE_REGISTRY: Mapping[str, ProfileManifest] = MappingProxyType(
-    {
-        CISCO_IOS_XE_17.profile_version_id: CISCO_IOS_XE_17,
-        FORTIOS_7.profile_version_id: FORTIOS_7,
-        JUNIPER_JUNOS_18.profile_version_id: JUNIPER_JUNOS_18,
-    }
+ARISTA_EOS_4 = ProfileManifest(
+    profile_id="arista.eos.4",
+    profile_version_id="arista.eos.4@1.0.0",
+    profile_version="1.0.0",
+    vendor="Arista",
+    product_family="EOS",
+    os="EOS",
+    version_constraint=VersionConstraint(frozenset({4})),
+    device_classes=frozenset({DeviceClass.SWITCH, DeviceClass.ROUTER}),
+    accepted_evidence_types=frozenset(ArtifactEvidenceType),
+    structural_reader_name="indentation_cli.v1",
+    knowledge_pack_name="arista_eos_4@1.0.0",
+    capabilities=frozenset({
+        "profile_detection", "structural_parsing", "semantic_interpretation",
+        "effective_state_resolution", "deterministic_compliance",
+    }),
+    coverage_manifest=MappingProxyType({
+        "supported_version_family": "Arista EOS 4.x",
+        "structural_reader": "indentation_cli.v1",
+        "canonical_fields": (
+            "management.remote.ssh.enabled",
+            "management.remote.telnet.enabled",
+            "management.session.idle_timeout",
+            "logging.remote.destination",
+            "time.ntp.server",
+            "management.remote.source.restriction.configured",
+        ),
+        "command_forms": (
+            "management ssh|telnet > shutdown|no shutdown",
+            "management ssh > idle-timeout <minutes>",
+            "management ssh > ip access-group <name> [vrf <name>] in",
+            "logging host <ip-or-hostname>",
+            "ntp server <ip-or-hostname>",
+        ),
+        "limitations": (
+            "EOS version must come from explicit version output",
+            "service defaults and unsupported command variants remain UNKNOWN",
+        ),
+    }),
+)
+
+GENERIC_CLI = ProfileManifest(
+    profile_id="generic.cli",
+    profile_version_id="generic.cli@1.0.0",
+    profile_version="1.0.0",
+    vendor="Generic",
+    product_family="Generic CLI",
+    os="CLI",
+    version_constraint=VersionConstraint(frozenset({1})),
+    device_classes=frozenset({DeviceClass.UNKNOWN, DeviceClass.OTHER}),
+    accepted_evidence_types=frozenset(ArtifactEvidenceType),
+    structural_reader_name="indentation_cli.v1",
+    knowledge_pack_name="generic_cli@1.0.0",
+    capabilities=frozenset({
+        "structural_parsing", "semantic_interpretation",
+        "effective_state_resolution", "deterministic_compliance",
+        "administrator_training",
+    }),
+    coverage_manifest=MappingProxyType({
+        "structural_reader": "indentation_cli.v1",
+        "canonical_fields": (),
+        "limitations": (
+            "No command semantics are assumed until an administrator publishes a mapping",
+            "Unsupported or unmatched syntax remains UNKNOWN",
+        ),
+    }),
+    structural_evidence_types=frozenset({
+        ArtifactEvidenceType.CONFIGURATION,
+        ArtifactEvidenceType.UNKNOWN_EVIDENCE,
+    }),
+)
+
+PROFILE_REGISTRY = ProfileManifestRegistry(
+    (CISCO_IOS_XE_17, FORTIOS_7, JUNIPER_JUNOS_18, ARISTA_EOS_4, GENERIC_CLI)
 )

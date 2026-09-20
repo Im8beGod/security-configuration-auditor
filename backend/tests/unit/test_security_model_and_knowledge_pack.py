@@ -14,6 +14,7 @@ from app.db.models import (
 )
 from app.interpretation.extractors import EXTRACTORS
 from app.interpretation.knowledge_pack import (
+    KnowledgePackRegistry,
     KnowledgePackValidationError,
     validate_knowledge_pack,
 )
@@ -54,12 +55,15 @@ def test_field_registry_accepts_registered_compatible_values_and_scopes():
         "management.remote.telnet.enabled",
         "management.remote.ssh.enabled",
         "management.remote.ssh.version",
-        "management.remote.https.enabled",
+            "management.remote.https.enabled",
+            "management.remote.http.enabled",
+            "management.remote.ssh.strong_crypto.configured",
         "management.remote.tls.minimum_version",
         "management.remote.source.restriction.configured",
         "management.remote.source.permitted_network",
         "management.session.idle_timeout",
-        "logging.enabled",
+            "logging.enabled",
+            "logging.administrative_access.enabled",
         "logging.remote.destination",
         "time.ntp.server",
         "time.ntp.configured",
@@ -147,8 +151,17 @@ def test_immutable_knowledge_pack_versions_remain_independently_loadable():
     assert legacy.mappings[0].mapping_version_id == current.mappings[0].mapping_version_id
     assert current.mappings[0].reset_mapping_version_id == UUID("e42c0eb2-1d5d-584a-b463-8ee80574a35c")
     assert fortios_legacy.version == "1.0.0"
-    assert fortios_current.version == "1.2.0"
+    assert fortios_current.version == "1.3.0"
     assert fortios_legacy.mappings[0].mapping_version_id != fortios_current.mappings[0].mapping_version_id
+
+
+def test_knowledge_pack_registry_rejects_conflicting_exact_versions():
+    changed = replace(CISCO_IOS_XE_17_KNOWLEDGE_PACK, version="9.9.9")
+    with pytest.raises(KnowledgePackValidationError, match="conflicts"):
+        KnowledgePackRegistry(
+            (CISCO_IOS_XE_17_KNOWLEDGE_PACK, changed),
+            active_by_profile={},
+        )
 
 
 @pytest.mark.parametrize(

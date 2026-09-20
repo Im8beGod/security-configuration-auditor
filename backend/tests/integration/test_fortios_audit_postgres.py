@@ -57,7 +57,7 @@ def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0017"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
             factory, "FortiOS E2E", f"fortios-e2e-{suffix}",
@@ -148,7 +148,7 @@ def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
             assert all(str(item) in str(artifact_ids) for fact in facts for item in [fact.evidence_refs[0]["artifact_id"]])
             assert db.scalar(select(EffectiveState).where(EffectiveState.audit_id == audit_id)) is not None
             findings = list(db.scalars(select(Finding).where(Finding.audit_id == audit_id)))
-            assert len(findings) == 8
+            assert len(findings) == 17
             assert {item.rule_pack_version_id for item in findings} == {
                 result.findings[0].rule_pack_version_id
             }

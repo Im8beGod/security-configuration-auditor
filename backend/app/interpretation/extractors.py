@@ -104,6 +104,10 @@ def extract_fortios_allowaccess_https(node: ConfigNode) -> ExtractionOutcome:
     return _extract_fortios_allowaccess(node, "https")
 
 
+def extract_fortios_allowaccess_http(node: ConfigNode) -> ExtractionOutcome:
+    return _extract_fortios_allowaccess(node, "http")
+
+
 def extract_fortios_timeout(node: ConfigNode) -> ExtractionOutcome:
     if len(node.arguments) != 2 or node.arguments[0].lower() != "admintimeout" or not INTEGER_PATTERN.fullmatch(node.arguments[1]):
         return ExtractionOutcome(None, "invalid_fortios_timeout")
@@ -121,6 +125,41 @@ def extract_presence_enabled(node: ConfigNode) -> ExtractionOutcome:
         type=TypedValueType.BOOLEAN, value=True,
         original_value=" ".join(node.arguments),
     ))
+
+
+def extract_presence_disabled(node: ConfigNode) -> ExtractionOutcome:
+    return ExtractionOutcome(TypedValue(
+        type=TypedValueType.BOOLEAN, value=False,
+        original_value=" ".join(node.arguments),
+    ))
+
+
+def extract_duration_minutes(node: ConfigNode) -> ExtractionOutcome:
+    if len(node.arguments) != 1 or not INTEGER_PATTERN.fullmatch(node.arguments[0]):
+        return ExtractionOutcome(None, "invalid_idle_timeout")
+    minutes = int(node.arguments[0])
+    if minutes > 86_400:
+        return ExtractionOutcome(None, "invalid_idle_timeout")
+    return ExtractionOutcome(TypedValue(
+        type=TypedValueType.DURATION, value=minutes * 60, unit="seconds",
+        original_value=node.arguments[0], original_unit="minutes",
+    ))
+
+
+def extract_arista_service_acl(node: ConfigNode) -> ExtractionOutcome:
+    arguments = tuple(item.lower() for item in node.arguments)
+    valid_shape = (
+        len(arguments) == 3 and arguments[0] == "access-group" and arguments[2] == "in"
+    ) or (
+        len(arguments) == 5 and arguments[0] == "access-group"
+        and arguments[2] == "vrf" and arguments[4] == "in"
+    )
+    if not valid_shape:
+        return ExtractionOutcome(None, "invalid_arista_service_acl")
+    names = (node.arguments[1],) if len(arguments) == 3 else (node.arguments[1], node.arguments[3])
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", item) for item in names):
+        return ExtractionOutcome(None, "invalid_arista_service_acl")
+    return extract_presence_enabled(node)
 
 
 def extract_cisco_access_class(node: ConfigNode) -> ExtractionOutcome:
@@ -259,8 +298,12 @@ EXTRACTORS = {
     "fortios_allowaccess_ssh": extract_fortios_allowaccess_ssh,
     "fortios_allowaccess_telnet": extract_fortios_allowaccess_telnet,
     "fortios_allowaccess_https": extract_fortios_allowaccess_https,
+    "fortios_allowaccess_http": extract_fortios_allowaccess_http,
     "fortios_timeout": extract_fortios_timeout,
     "presence_enabled": extract_presence_enabled,
+    "presence_disabled": extract_presence_disabled,
+    "duration_minutes": extract_duration_minutes,
+    "arista_service_acl": extract_arista_service_acl,
     "cisco_access_class": extract_cisco_access_class,
     "ntp_key_id": extract_ntp_key_id,
     "fortios_trusthost_network": extract_fortios_trusthost_network,

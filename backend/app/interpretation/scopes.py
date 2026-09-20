@@ -87,11 +87,25 @@ def resolve_fortios_administrator(node: ConfigNode, ir: StructuralIR) -> ScopeOu
     return ScopeOutcome(ScopeRef("administrator", f"administrator:{name}", {"name": name}), context_node=edit)
 
 
+def resolve_arista_management_service(node: ConfigNode, ir: StructuralIR) -> ScopeOutcome:
+    parent = _parent(node, ir)
+    if (
+        parent is None or parent.command != "management"
+        or tuple(item.lower() for item in parent.arguments) != ("ssh",)
+    ):
+        return ScopeOutcome(None, context_node=parent, diagnostic_code="unsupported_management_service_scope")
+    return ScopeOutcome(
+        ScopeRef("management_service", "management:ssh", {"service": "ssh"}),
+        context_node=parent,
+    )
+
+
 SCOPE_RESOLVERS = {
     "device": resolve_device_scope,
     "vty_range": resolve_vty_range,
     "interface": resolve_fortios_interface,
     "administrator": resolve_fortios_administrator,
+    "arista_management_service": resolve_arista_management_service,
 }
 
 SCOPE_RESOLVER_TYPES = {
@@ -99,4 +113,5 @@ SCOPE_RESOLVER_TYPES = {
     "vty_range": "vty_range",
     "interface": "interface",
     "administrator": "administrator",
+    "arista_management_service": "management_service",
 }

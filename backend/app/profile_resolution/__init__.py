@@ -13,12 +13,14 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, JUNIPER_JUNOS_18, PROFILE_REGISTRY, ProfileManifest
+from app.profile_resolution.registry import ARISTA_EOS_4, CISCO_IOS_XE_17, FORTIOS_7, GENERIC_CLI, JUNIPER_JUNOS_18, PROFILE_REGISTRY, ProfileManifest
 from app.profile_resolution.resolver import resolve_profile
 
 __all__ = [
+    "ARISTA_EOS_4",
     "CISCO_IOS_XE_17",
     "FORTIOS_7",
+    "GENERIC_CLI",
     "JUNIPER_JUNOS_18",
     "EvidenceSignal",
     "MAX_ARTIFACT_INSPECTION_BYTES",

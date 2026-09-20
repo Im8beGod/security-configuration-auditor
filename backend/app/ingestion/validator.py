@@ -76,7 +76,7 @@ def _classify_evidence(
     lowered = text.lower()
     if extension in {".cfg", ".conf", ".config"}:
         return ArtifactEvidenceType.CONFIGURATION
-    if any(marker in lowered for marker in ("show version", "software version", "firmware version")):
+    if any(marker in lowered for marker in ("show version", "software version", "software image version", "firmware version")):
         return ArtifactEvidenceType.VERSION_OUTPUT
     if any(marker in lowered for marker in ("show inventory", "serial number", "hardware inventory")):
         return ArtifactEvidenceType.INVENTORY_OUTPUT

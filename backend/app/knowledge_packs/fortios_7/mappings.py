@@ -138,3 +138,19 @@ MAPPINGS = tuple(
         "ntp_configured", {TypedValueType.BOOLEAN},
     ),
 )
+
+PHASE4_MAPPINGS = MAPPINGS + (
+    _mapping(
+        "a1b2c3d4-5309-5aaa-8aaa-000000000013", "a1b2c3d4-6309-5aaa-8aaa-000000000013",
+        "management.remote.http.enabled",
+        NodeMatcher("set", ("allowaccess",), "edit", (), "config", ("system", "interface")),
+        "fortios_allowaccess_http", {TypedValueType.BOOLEAN}, scope="interface", reset="a1b2c3d4-6409-5aaa-8aaa-000000000013",
+    ),
+    _mapping(
+        "a1b2c3d4-5409-5aaa-8aaa-000000000013", "a1b2c3d4-6409-5aaa-8aaa-000000000013",
+        "management.remote.http.enabled",
+        NodeMatcher("unset", ("allowaccess",), "edit", (), "config", ("system", "interface")),
+        "fortios_allowaccess_http", {TypedValueType.BOOLEAN}, scope="interface",
+        negation=NegationBehavior.RESET_TO_DEFAULT, reset="a1b2c3d4-6509-5aaa-8aaa-000000000013",
+    ),
+)

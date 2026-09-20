@@ -104,12 +104,18 @@ def coverage_summary(results: tuple[AssessmentResult, ...] | list[AssessmentResu
     }
     for result in results:
         counts[result.applicability_status.value] += 1
-        if result.implementation_status is ImplementationStatus.IMPLEMENTED and result.assessment_method is AssessmentMethod.AUTOMATIC:
+        if result.implementation_status is ImplementationStatus.UNIMPLEMENTED:
+            counts["unimplemented"] += 1
+        elif result.implementation_status is ImplementationStatus.IMPLEMENTED and result.assessment_method is AssessmentMethod.AUTOMATIC:
             counts["automatic_implemented"] += 1
             if result.verdict in counts["automatic_verdicts"]:
                 counts["automatic_verdicts"][result.verdict] += 1
         elif result.implementation_status is ImplementationStatus.MANUAL or result.assessment_method is AssessmentMethod.MANUAL:
             counts["manual"] += 1
-        elif result.implementation_status is ImplementationStatus.UNIMPLEMENTED:
-            counts["unimplemented"] += 1
+    counts.update({
+        "automatic": counts["automatic_implemented"],
+        "pass": counts["automatic_verdicts"]["pass"],
+        "fail": counts["automatic_verdicts"]["fail"],
+        "unknown": counts["automatic_verdicts"]["unknown"],
+    })
     return counts

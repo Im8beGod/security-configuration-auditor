@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -68,6 +68,7 @@ class ProfileResolutionResult:
     supporting_signals: tuple[EvidenceSignal, ...]
     unresolved_reasons: tuple[str, ...]
     conflicts: tuple[ResolutionConflict, ...]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def identity_provenance(self) -> dict[str, list[dict[str, Any]]]:
@@ -104,4 +105,5 @@ class ProfileResolutionResult:
                 {"code": item.code, "artifact_ids": [str(value) for value in item.artifact_ids]}
                 for item in self.conflicts
             ],
+            "metadata": self.metadata,
         }

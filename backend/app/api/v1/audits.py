@@ -19,7 +19,10 @@ from app.audit.service import (
     start_audit,
 )
 from app.assessment_packs.service import compatible_packs
-from app.db.models import AuditAssessment, AssessmentPackVersion, ProfileResolutionDecision
+from app.db.models import (
+    AssessmentObligation, AssessmentPackVersion, AssessmentResult,
+    AuditAssessment, AuditFrameworkAssessment, ProfileResolutionDecision,
+)
 from app.reevaluation.service import eligibility as reevaluation_eligibility, history as reevaluation_history, start as start_reevaluation
 from app.auth.dependencies import get_current_user, require_roles
 from app.db.models import Audit, User, UserRole
@@ -66,6 +69,19 @@ def _response(db: Session, audit: Audit, job=None) -> AuditResponse:
                 }
         else:
             response.assessment = {"assessment_pack_version_id": requested}
+    framework_pins = list(db.scalars(select(AuditFrameworkAssessment).where(
+        AuditFrameworkAssessment.audit_id == audit.audit_id,
+    ))) if (audit.version_refs or {}).get("assessment_pack_version_ids") else []
+    if framework_pins:
+        packs = list(db.scalars(select(AssessmentPackVersion).where(
+            AssessmentPackVersion.assessment_pack_version_id.in_([item.assessment_pack_version_id for item in framework_pins])
+        )))
+        response.assessments = [{
+            "assessment_pack_version_id": str(pack.assessment_pack_version_id),
+            "family": pack.family, "name": pack.name, "version": pack.version,
+            "source_version_label": pack.source_version_label,
+            "content_digest": pack.content_digest,
+        } for pack in sorted(packs, key=lambda item: item.family)]
     return response
 
 
@@ -154,6 +170,35 @@ def profile_resolution_endpoint(
         "identity_provenance": decision.identity_provenance,
         "evidence_summary": decision.evidence_summary,
     }
+
+
+@router.get("/{audit_id}/assessment-results", response_model=list[dict[str, object]])
+def assessment_results_endpoint(
+    audit_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict[str, object]]:
+    audit = get_audit(db, user, audit_id)
+    rows = db.execute(select(AssessmentResult, AssessmentObligation).join(
+        AssessmentObligation,
+        AssessmentResult.assessment_obligation_id == AssessmentObligation.assessment_obligation_id,
+    ).where(
+        AssessmentResult.audit_id == audit.audit_id,
+        AssessmentResult.organization_id == user.organization_id,
+    ).order_by(AssessmentObligation.control_id, AssessmentObligation.obligation_key)).all()
+    return [{
+        "assessment_result_id": str(result.assessment_result_id),
+        "obligation_key": obligation.obligation_key,
+        "control_id": obligation.control_id, "title": obligation.title,
+        "framework_version": obligation.framework_version,
+        "severity": obligation.severity, "scope": obligation.scope,
+        "source_url": obligation.source_url, "source_digest": obligation.source_digest,
+        "source_reference": obligation.source_reference,
+        "applicability_status": result.applicability_status,
+        "assessment_method": result.assessment_method,
+        "implementation_status": result.implementation_status,
+        "verdict": result.verdict, "details": result.result_details,
+    } for result, obligation in rows]
 
 
 @router.post("/{audit_id}/run", response_model=AuditResponse)

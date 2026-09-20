@@ -35,6 +35,7 @@ def rule(rule_id):
     ("management.ssh.version_2", _value("integer", 2), FindingVerdict.PASS),
     ("management.ssh.version_2", _value("integer", 1), FindingVerdict.FAIL),
     ("management.idle_timeout.maximum", _value("duration", 300), FindingVerdict.PASS),
+    ("management.idle_timeout.maximum", _value("duration", 0), FindingVerdict.FAIL),
     ("management.idle_timeout.maximum", _value("duration", 301), FindingVerdict.FAIL),
     ("logging.enabled", _value("boolean", True), FindingVerdict.PASS),
     ("logging.enabled", _value("boolean", False), FindingVerdict.FAIL),
@@ -54,8 +55,21 @@ def test_bounded_rules_produce_expected_verdicts(rule_id, value, expected):
     assert evaluate_condition(rule(rule_id), value, parameter) is expected
 
 
+def test_zero_idle_timeout_is_reported_as_outside_the_compliant_range():
+    from app.compliance.service import _expected
+
+    idle_rule = rule("management.idle_timeout.maximum")
+    assert evaluate_condition(idle_rule, _value("duration", 0), 300) is FindingVerdict.FAIL
+    assert _expected(idle_rule, 300) == {
+        "operator": "less_than_or_equal",
+        "parameter": "maximum_admin_idle_timeout_seconds",
+        "value": 300,
+        "minimum_exclusive": 0,
+    }
+
+
 def test_registry_is_versioned_immutable_and_fails_closed():
-    assert len(RULE_PACK.rules) == 12
+    assert len(RULE_PACK.rules) == 17
     assert RuleRegistry().get(RULE_PACK.rule_pack_version_id) is RULE_PACK
     with pytest.raises(RuleRegistryError, match="unavailable"):
         RuleRegistry().get(uuid4())
@@ -75,8 +89,13 @@ def test_selected_nist_references_are_verified_and_not_verdict_logic():
         "management.telnet.disabled": ("AC-17", "Remote Access"),
         "management.ssh.enabled": ("AC-17", "Remote Access"),
         "management.ssh.version_2": ("AC-17", "Remote Access"),
+        "management.http.disabled": ("AC-17", "Remote Access"),
+        "management.https.enabled": ("AC-17", "Remote Access"),
+        "management.tls.minimum_1_2": ("AC-17", "Remote Access"),
+        "management.ssh.strong_crypto": ("AC-17", "Remote Access"),
         "management.idle_timeout.maximum": ("AC-11", "Session Lock"),
         "logging.enabled": ("AU-12", "Audit Record Generation"),
+        "logging.administrative_access.enabled": ("AU-12", "Audit Record Generation"),
         "logging.remote.destination.configured": ("AU-12", "Audit Record Generation"),
         "time.ntp.server.configured": ("AU-8", "Time Stamps"),
         "time.ntp.configured": ("AU-8", "Time Stamps"),
@@ -126,6 +145,40 @@ def test_unknown_verdict_is_independent_of_nist_reference():
     unknown = next(item for item in drafts if item.rule_id == "management.ssh.enabled")
     assert unknown.verdict is FindingVerdict.UNKNOWN
     assert unknown.framework_references[0]["control_id"] == "AC-17"
+
+
+def test_affected_unresolved_evidence_prevents_a_compliant_finding():
+    from app.compliance.service import evaluate_audit_compliance
+    from app.effective_state import ResolutionStatus
+
+    audit = SimpleNamespace(
+        audit_id=UUID(int=20), device_id=UUID(int=21), status=AuditStatus.PROCESSING,
+        profile_resolution={"resolution_status": "resolved", "profile_version_id": RULE_PACK.profile_version_id},
+    )
+    state = SimpleNamespace(
+        effective_state_id=UUID(int=22), device_id=audit.device_id,
+        field_id="management.remote.ssh.enabled",
+        scope={"type": "device", "key": "device", "attributes": {}},
+        resolution_status=ResolutionStatus.RESOLVED,
+        effective_value=_value("boolean", True), unresolved_reason=None,
+    )
+    block = SimpleNamespace(
+        audit_id=audit.audit_id,
+        affected_rule_ids=["management.ssh.enabled"],
+        evidence_refs=[{"artifact_id": str(UUID(int=23)), "source_path": "unknown.cfg"}],
+    )
+    db = SimpleNamespace(scalar=lambda _statement: audit)
+
+    drafts = evaluate_audit_compliance(
+        db, audit_id=audit.audit_id, organization_id=UUID(int=24),
+        rule_pack=RULE_PACK, organization_policy=None,
+        effective_states=(state,), unresolved_blocks=(block,),
+    )
+
+    finding = next(item for item in drafts if item.rule_id == "management.ssh.enabled")
+    assert finding.verdict is FindingVerdict.UNKNOWN
+    assert finding.unknown_reason is UnresolvedReason.UNSUPPORTED_FEATURE
+    assert finding.evidence_refs == tuple(block.evidence_refs)
 
 
 def test_unsupported_operator_and_typed_value_fail_closed():

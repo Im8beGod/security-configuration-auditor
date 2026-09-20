@@ -1,0 +1,9 @@
+<configuration>
+  <version>18.4R1-S2.4</version>
+  <system>
+    <services><ssh/><telnet/></services>
+    <login><idle-timeout>15</idle-timeout></login>
+    <syslog><host><name>logs.example.invalid</name></host></syslog>
+    <ntp><server><name>time.example.invalid</name></server></ntp>
+  </system>
+</configuration>

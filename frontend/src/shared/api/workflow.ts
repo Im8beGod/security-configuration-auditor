@@ -1,4 +1,4 @@
-import type { Artifact, AssessmentPackSummary, Audit, BatchAuditResponse, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
+import type { Artifact, AssessmentPackSummary, AssessmentResult, Audit, BatchAuditResponse, BulkUploadResponse, Device, DeviceCreate, JobSummary, ReevaluationEligibility, Snapshot } from '../types/workflow'
 import { apiRequest } from './client'
 
 export const workflowKeys = {
@@ -78,9 +78,9 @@ export async function listAssessmentPacks(profileVersionId?: string): Promise<As
   return await apiRequest(`/audits/assessment-packs${query}`) as AssessmentPackSummary[]
 }
 
-export async function createAudit(snapshotId: string, assessmentPackVersionId?: string): Promise<Audit> {
+export async function createAudit(snapshotId: string, assessmentPackVersionId?: string, selectedFrameworks: string[] = []): Promise<Audit> {
   return await apiRequest('/audits', {
-    method: 'POST', body: json({ snapshot_id: snapshotId, selected_frameworks: [], ...(assessmentPackVersionId ? { assessment_pack_version_id: assessmentPackVersionId } : {}) }),
+    method: 'POST', body: json({ snapshot_id: snapshotId, selected_frameworks: selectedFrameworks, ...(assessmentPackVersionId ? { assessment_pack_version_id: assessmentPackVersionId } : {}) }),
   }) as Audit
 }
 
@@ -88,11 +88,15 @@ export async function runAudit(id: string): Promise<Audit> {
   return await apiRequest(`/audits/${id}/run`, { method: 'POST' }) as Audit
 }
 
-export async function createBatchAudits(items: Array<{ device_id: string; snapshot_id: string; assessment_pack_version_id?: string }>): Promise<BatchAuditResponse> {
+export async function createBatchAudits(items: Array<{ device_id: string; snapshot_id: string; assessment_pack_version_id?: string; selected_frameworks?: string[] }>): Promise<BatchAuditResponse> {
   return await apiRequest('/audits/batch', {
     method: 'POST',
-    body: json({ items: items.map((item) => ({ ...item, selected_frameworks: [] })) }),
+    body: json({ items: items.map((item) => ({ ...item, selected_frameworks: item.selected_frameworks ?? [] })) }),
   }) as BatchAuditResponse
+}
+
+export async function getAssessmentResults(id: string): Promise<AssessmentResult[]> {
+  return await apiRequest(`/audits/${id}/assessment-results`) as AssessmentResult[]
 }
 
 export async function getJob(id: string): Promise<JobSummary> {

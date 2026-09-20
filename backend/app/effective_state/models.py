@@ -211,6 +211,13 @@ def _validate_scope(scope: ScopeRef) -> None:
             and dict(scope.attributes) == {"name": name}
             and scope.key == f"{label}:{name}"
         )
+    elif scope.type == "management_service":
+        service = dict(scope.attributes).get("service")
+        valid = (
+            service in {"ssh", "telnet", "http", "https"}
+            and dict(scope.attributes) == {"service": service}
+            and scope.key == f"management:{service}"
+        )
     else:
         valid = False
     if not valid:

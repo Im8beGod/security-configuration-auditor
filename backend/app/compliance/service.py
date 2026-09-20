@@ -15,7 +15,7 @@ from app.compliance.models import (
 )
 from app.compliance.policy import resolve_parameter
 from app.compliance.verdicts import FindingVerdict
-from app.db.models import Audit, AuditStatus, EffectiveState, Finding
+from app.db.models import Audit, AuditStatus, EffectiveState, Finding, SecurityFact, UnresolvedBlock
 from app.effective_state.contracts import ResolutionStatus, UnresolvedReason
 from app.security_model import ScopeRef
 
@@ -30,11 +30,15 @@ def _scope(state: EffectiveState) -> ScopeRef:
 
 
 def _expected(rule: RuleDefinition, parameter: object | None) -> dict[str, object] | None:
+    lower_bound = (
+        {"minimum_exclusive": rule.condition["minimum_exclusive"]}
+        if "minimum_exclusive" in rule.condition else {}
+    )
     if "expected" in rule.condition:
-        return {"operator": rule.condition["operator"], "value": rule.condition["expected"]}
+        return {"operator": rule.condition["operator"], "value": rule.condition["expected"], **lower_bound}
     if parameter is not None:
-        return {"operator": rule.condition["operator"], "parameter": rule.condition.get("parameter"), "value": parameter}
-    return {"operator": rule.condition["operator"]}
+        return {"operator": rule.condition["operator"], "parameter": rule.condition.get("parameter"), "value": parameter, **lower_bound}
+    return {"operator": rule.condition["operator"], **lower_bound}
 
 
 def _explanation(verdict: FindingVerdict, rule: RuleDefinition, observed: dict | None, reason: UnresolvedReason | None) -> str:
@@ -52,14 +56,15 @@ def _explanation(verdict: FindingVerdict, rule: RuleDefinition, observed: dict |
 
 def _draft(rule: RuleDefinition, pack: RulePack, audit: Audit, *, verdict: FindingVerdict,
            scope: ScopeRef | None, states: tuple[EffectiveState, ...] = (), observed: dict | None = None,
-           expected: dict | None = None, reason: UnresolvedReason | None = None) -> FindingDraft:
+           expected: dict | None = None, reason: UnresolvedReason | None = None,
+           evidence_refs: tuple[dict, ...] = ()) -> FindingDraft:
     return FindingDraft(
         finding_id=deterministic_finding_id(audit.audit_id, rule.rule_id, scope), audit_id=audit.audit_id,
         device_id=audit.device_id, comparison_key=comparison_key(rule.rule_id, scope), rule_id=rule.rule_id,
         rule_pack_version_id=pack.rule_pack_version_id, title=rule.title, security_domain=rule.security_domain,
         verdict=verdict, severity=rule.severity, expected_state=expected, observed_state=observed,
         explanation=_explanation(verdict, rule, observed, reason), affected_scope=scope,
-        effective_state_refs=tuple(state.effective_state_id for state in states), evidence_refs=(),
+        effective_state_refs=tuple(state.effective_state_id for state in states), evidence_refs=evidence_refs,
         unknown_reason=reason, framework_references=rule.framework_references,
     )
 
@@ -68,6 +73,7 @@ def evaluate_audit_compliance(
     db: Session, *, audit_id: UUID, organization_id: UUID, rule_pack: RulePack,
     organization_policy: OrganizationPolicyVersion | None,
     effective_states: tuple[EffectiveState, ...] | None = None,
+    unresolved_blocks: tuple[UnresolvedBlock, ...] = (),
 ) -> tuple[FindingDraft, ...]:
     """Evaluate persisted EffectiveStates only; no parser or SecurityFact dependency exists here."""
     audit = db.scalar(select(Audit).where(Audit.audit_id == audit_id, Audit.organization_id == organization_id))
@@ -87,7 +93,31 @@ def evaluate_audit_compliance(
         if state.device_id != audit.device_id:
             raise ComplianceError("EffectiveState crosses the Audit boundary")
         by_field[state.field_id].append(state)
+    fact_ids = {
+        UUID(str(fact_id)) for state in states
+        for fact_id in getattr(state, "source_fact_ids", ())
+    }
+    facts = list(db.scalars(select(SecurityFact).where(
+        SecurityFact.audit_id == audit_id,
+        SecurityFact.fact_id.in_(fact_ids),
+    ))) if fact_ids else []
+    evidence_by_fact = {str(fact.fact_id): fact.evidence_refs for fact in facts}
+
+    def state_evidence(state: EffectiveState) -> tuple[dict, ...]:
+        unique: dict[str, dict] = {}
+        for fact_id in getattr(state, "source_fact_ids", ()):
+            for reference in evidence_by_fact.get(str(fact_id), []):
+                if isinstance(reference, dict):
+                    key = repr(sorted(reference.items()))
+                    unique[key] = reference
+        return tuple(unique.values())
     applicability = determine_applicability(audit, rule_pack)
+    unresolved_by_rule: dict[str, list[UnresolvedBlock]] = defaultdict(list)
+    for block in unresolved_blocks:
+        if block.audit_id != audit.audit_id:
+            raise ComplianceError("Unresolved evidence crosses the Audit boundary")
+        for rule_id in block.affected_rule_ids:
+            unresolved_by_rule[rule_id].append(block)
     drafts: list[FindingDraft] = []
     for rule in rule_pack.rules:
         if applicability.status is ApplicabilityStatus.NOT_APPLICABLE:
@@ -104,26 +134,48 @@ def evaluate_audit_compliance(
             scope = _scope(state)
             if state.resolution_status is not ResolutionStatus.RESOLVED:
                 reason = UnresolvedReason.CONFLICTING_EVIDENCE if state.resolution_status is ResolutionStatus.CONFLICTING else state.unresolved_reason
-                drafts.append(_draft(rule, rule_pack, audit, verdict=FindingVerdict.UNKNOWN, scope=scope, states=(state,), reason=reason))
+                drafts.append(_draft(rule, rule_pack, audit, verdict=FindingVerdict.UNKNOWN, scope=scope, states=(state,), reason=reason, evidence_refs=state_evidence(state)))
                 continue
             parameter = resolve_parameter(organization_policy, rule.condition.get("parameter", "")) if rule.required_policy_parameters else None
             if rule.required_policy_parameters and parameter is None:
-                drafts.append(_draft(rule, rule_pack, audit, verdict=FindingVerdict.MANUAL_REVIEW, scope=scope, states=(state,), observed=state.effective_value, expected=_expected(rule, None)))
+                drafts.append(_draft(rule, rule_pack, audit, verdict=FindingVerdict.MANUAL_REVIEW, scope=scope, states=(state,), observed=state.effective_value, expected=_expected(rule, None), evidence_refs=state_evidence(state)))
                 continue
             try:
                 verdict = evaluate_condition(rule, state.effective_value, parameter)
-                drafts.append(_draft(rule, rule_pack, audit, verdict=verdict, scope=scope, states=(state,), observed=state.effective_value, expected=_expected(rule, parameter)))
+                blockers = unresolved_by_rule.get(rule.rule_id, ())
+                if verdict is FindingVerdict.PASS and blockers:
+                    evidence_refs = tuple(
+                        reference
+                        for block in blockers
+                        for reference in block.evidence_refs
+                        if isinstance(reference, dict)
+                    )
+                    drafts.append(_draft(
+                        rule, rule_pack, audit, verdict=FindingVerdict.UNKNOWN,
+                        scope=scope, states=(state,), observed=state.effective_value,
+                        expected=_expected(rule, parameter),
+                        reason=UnresolvedReason.UNSUPPORTED_FEATURE,
+                        evidence_refs=evidence_refs,
+                    ))
+                else:
+                    drafts.append(_draft(rule, rule_pack, audit, verdict=verdict, scope=scope, states=(state,), observed=state.effective_value, expected=_expected(rule, parameter), evidence_refs=state_evidence(state)))
             except EvaluationError:
-                drafts.append(_draft(rule, rule_pack, audit, verdict=FindingVerdict.PROCESS_ERROR, scope=scope, states=(state,), observed=state.effective_value))
+                drafts.append(_draft(rule, rule_pack, audit, verdict=FindingVerdict.PROCESS_ERROR, scope=scope, states=(state,), observed=state.effective_value, evidence_refs=state_evidence(state)))
     return tuple(drafts)
 
 
 def persist_audit_findings(db: Session, *, audit_id: UUID, organization_id: UUID,
                            rule_pack: RulePack, organization_policy: OrganizationPolicyVersion | None,
-                           effective_states: tuple[EffectiveState, ...] | None = None) -> tuple[Finding, ...]:
+                           effective_states: tuple[EffectiveState, ...] | None = None,
+                           unresolved_blocks: tuple[UnresolvedBlock, ...] | None = None) -> tuple[Finding, ...]:
+    if unresolved_blocks is None:
+        unresolved_blocks = tuple(db.scalars(select(UnresolvedBlock).where(
+            UnresolvedBlock.audit_id == audit_id
+        ).order_by(UnresolvedBlock.unresolved_block_id)))
     drafts = evaluate_audit_compliance(
         db, audit_id=audit_id, organization_id=organization_id, rule_pack=rule_pack,
         organization_policy=organization_policy, effective_states=effective_states,
+        unresolved_blocks=unresolved_blocks,
     )
     audit = db.scalar(select(Audit).where(Audit.audit_id == audit_id, Audit.organization_id == organization_id).with_for_update())
     if audit is None or audit.status is not AuditStatus.PROCESSING:

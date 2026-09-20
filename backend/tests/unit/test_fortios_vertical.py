@@ -120,6 +120,7 @@ def test_fortios_unset_uses_existing_effective_state_reset_semantics():
         "management.remote.telnet.enabled",
         "management.remote.ssh.enabled",
         "management.remote.https.enabled",
+        "management.remote.http.enabled",
     }
     assert all(fact.value.value is None for fact in facts)
     assert all(fact.validation_status.value == "unresolved" for fact in facts)

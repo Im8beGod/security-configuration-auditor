@@ -38,6 +38,8 @@ immutable at their lifecycle boundaries.
 - Cisco IOS XE 17.x
 - Fortinet FortiOS 7.x
 - Juniper Junos 18.x XML onboarding
+- Arista EOS 4.x
+- Generic CLI ingestion for administrator-supervised training
 
 Coverage is intentionally profile- and version-bounded; this is not universal
 support for every vendor or release.
@@ -59,7 +61,7 @@ technical alignment only.
 - Single- and multi-file evidence upload with device and immutable Snapshot records
 - Profile-aware multi-vendor normalization into shared SecurityFacts and EffectiveState
 - Deterministic PASS, FAIL, and UNKNOWN findings with persisted evidence and provenance
-- Reviewed, preview-only remediation guidance across Cisco, FortiOS, and Junos
+- Reviewed, preview-only remediation guidance across Cisco, FortiOS, Junos, and Arista
 - PDF reporting and a fleet dashboard
 - Low-code mapping, validation, approval, immutable Knowledge Packs, and historical re-evaluation
 
@@ -96,13 +98,12 @@ The frontend is available at `http://localhost:5173`; the API is at
 ## 3-5 minute demo
 
 1. Sign in and open the Fleet Dashboard.
-2. Upload the approved Cisco IOS XE development fixture at
-   `backend/tests/fixtures/cisco_ios_xe/representative.cfg`; create or confirm
-   its Device and Snapshot.
-3. Select an applicable AssessmentPack and run the audit.
-4. Open a FAIL or UNKNOWN finding to show persisted evidence, then open the
-   reviewed remediation preview.
-5. Generate the PDF report and return to the Fleet Dashboard.
+2. Upload files from `demo/configurations/` for Cisco, FortiOS, Junos, and
+   Arista; create one Device and Snapshot per vendor.
+3. Select the applicable frameworks and run each audit.
+4. Show control coverage, evidence, a validated remediation preview, and PDF.
+5. Upload `unknown-vendor.cfg`, map one command, approve and publish it, then
+   re-evaluate the same evidence without redeployment.
 
 Use [the demo runbook](docs/demo-runbook.md) for judge narration.
 
@@ -134,7 +135,7 @@ coverage, universal compliance, or ISO conformity assessment.
 
 ## Migration and verification
 
-The final Alembic head is `20260909_0018`. The backend and worker never apply
+The final Alembic head is `20260920_0023`. The backend and worker never apply
 migrations automatically.
 
 ```powershell
@@ -143,6 +144,11 @@ docker compose run --rm backend alembic -c database/alembic.ini current
 docker compose run --rm backend alembic -c database/alembic.ini check
 git diff --check
 ```
+
+Externally supplied licensed CIS and ISO control files can be imported as
+manual-only versioned packs through the administrator API or CLI. See
+[the catalog import contract](docs/catalog-import.md). Imported controls never
+receive automatic evaluators or invented PASS results.
 
 Real `.env` files, secrets, uploaded artifacts, reports, caches, database
 dumps, and runtime storage must never be committed.

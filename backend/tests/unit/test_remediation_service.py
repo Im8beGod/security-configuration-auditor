@@ -4,7 +4,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.remediation.service import RemediationError, _applicable, _validate_procedure, _value
-from app.remediation.catalog import REVIEWED_CISCO_PROCEDURES_BY_RULE
+from app.remediation.catalog import (
+    REMEDIATION_PROCEDURE_REGISTRY,
+    REVIEWED_CISCO_PROCEDURES_BY_RULE,
+)
 from app.remediation.service import _select, preview_remediation
 
 
@@ -61,20 +64,22 @@ def _catalog_context(rule_id, profile="cisco.ios_xe.17@1.0.0"):
     return db, finding, audit
 
 
-def test_reviewed_cisco_catalog_selects_only_three_supported_rules_and_previews_cli():
+def test_reviewed_cisco_catalog_selects_supported_rules_and_previews_cli():
     expected = {
         "management.ssh.version_2": ([], "ip ssh version 2"),
         "logging.remote.destination.configured": (["destination"], "logging host 192.0.2.10"),
         "time.ntp.server.configured": (["server"], "ntp server time.example.invalid"),
+        "management.telnet.disabled": (["vty_range"], "transport input ssh"),
     }
     for rule_id, (parameter_names, command) in expected.items():
         db, finding, audit = _catalog_context(rule_id)
         selected, reason, source = _select(db, finding, audit)
         assert selected is REVIEWED_CISCO_PROCEDURES_BY_RULE[rule_id]
         assert reason is None and source == "built_in_reviewed_catalog"
-        parameters = {name: ("192.0.2.10" if name == "destination" else "time.example.invalid") for name in parameter_names}
+        parameters = {name: ("192.0.2.10" if name == "destination" else "0 15" if name == "vty_range" else "time.example.invalid") for name in parameter_names}
         preview = preview_remediation(db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id, parameters)
         assert command in preview["rendered_steps"]
+        assert preview["rendered_verification_steps"] and preview["rendered_rollback_steps"]
         assert preview["verification_steps"] and preview["rollback_steps"] and preview["source_references"]
         assert preview["reviewed_at"] and preview["validated_at"]
 
@@ -92,3 +97,23 @@ def test_catalog_rejects_malformed_parameters_without_execution():
     db, finding, _audit = _catalog_context("logging.remote.destination.configured")
     with pytest.raises(RemediationError):
         preview_remediation(db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id, {"destination": "bad value"})
+
+
+def test_reviewed_remediation_registry_is_immutable_and_versioned():
+    procedure = next(iter(REMEDIATION_PROCEDURE_REGISTRY.by_id.values()))
+    assert REMEDIATION_PROCEDURE_REGISTRY.for_rule(procedure.rule_id) is procedure
+    with pytest.raises(TypeError):
+        REMEDIATION_PROCEDURE_REGISTRY.by_id[uuid4()] = procedure
+
+
+def test_explicit_procedure_reference_must_match_the_finding_rule():
+    db, finding, audit = _catalog_context("management.ssh.enabled")
+    selected = next(iter(REMEDIATION_PROCEDURE_REGISTRY.by_id.values()))
+    finding.remediation_procedure_id = selected.procedure_id
+    db.get = lambda _model, identifier: selected if identifier == selected.procedure_id else audit
+
+    procedure, reason, source = _select(db, finding, audit)
+
+    assert procedure is None
+    assert reason == "invalid_registry_entry"
+    assert source is None

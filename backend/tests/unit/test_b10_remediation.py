@@ -11,3 +11,13 @@ def test_b10_six_safe_profile_scoped_procedures():
  assert _value({'type':'integer','minimum':1,'maximum':60},'10')=='10'
  with pytest.raises(RemediationError): _value({'type':'integer','minimum':1,'maximum':60},'0')
  with pytest.raises(RemediationError): _value({'type':'enum','values':['0 4']},'0 4;reload')
+
+
+def test_phase1_migration_matches_generated_telnet_finding_rule_ids():
+ migration_path = ROOT/'database/migrations/versions/20260920_0021_fix_remediation_rule_bindings.py'
+ spec=importlib.util.spec_from_file_location('phase1_remediation_fix',migration_path)
+ migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
+ assert migration.GENERATED_TELNET_RULE_ID == 'management.telnet.disabled'
+ assert {migration.FORTIOS_PROCEDURE_ID,migration.JUNOS_PROCEDURE_ID} == {
+  '20000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000005'
+ }

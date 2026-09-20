@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +26,7 @@ class NegationBehavior(str, Enum):
     UNSUPPORTED = "unsupported"
     RESET_TO_DEFAULT = "reset_to_default"
     REMOVE_VALUE = "remove_value"
+    INVERT_BOOLEAN = "invert_boolean"
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,57 @@ class KnowledgePack:
     profile_id: str
     profile_version_id: str
     mappings: tuple[DeclarativeMapping, ...]
+
+
+class KnowledgePackRegistry(Mapping[UUID, KnowledgePack]):
+    """Immutable exact-version registry with one explicit active pack per profile."""
+
+    def __init__(
+        self,
+        packs: tuple[KnowledgePack, ...],
+        *,
+        active_by_profile: Mapping[str, UUID],
+    ) -> None:
+        by_version: dict[UUID, KnowledgePack] = {}
+        logical_versions: dict[tuple[str, str], KnowledgePack] = {}
+        for pack in packs:
+            if (
+                not isinstance(pack.knowledge_pack_id, UUID)
+                or not isinstance(pack.knowledge_pack_version_id, UUID)
+                or pack.knowledge_pack_id.int == 0
+                or pack.knowledge_pack_version_id.int == 0
+                or not pack.name.strip()
+                or not pack.version.strip()
+            ):
+                raise KnowledgePackValidationError("Knowledge pack requires stable identity")
+            existing = by_version.get(pack.knowledge_pack_version_id)
+            logical = logical_versions.get((pack.name, pack.version))
+            if (existing is not None and existing != pack) or (
+                logical is not None and logical != pack
+            ):
+                raise KnowledgePackValidationError("Knowledge pack version content conflicts")
+            by_version[pack.knowledge_pack_version_id] = pack
+            logical_versions[(pack.name, pack.version)] = pack
+        active: dict[str, KnowledgePack] = {}
+        for profile_version_id, version_id in active_by_profile.items():
+            pack = by_version.get(version_id)
+            if pack is None or pack.profile_version_id != profile_version_id:
+                raise KnowledgePackValidationError("Active knowledge pack binding is invalid")
+            active[profile_version_id] = pack
+        self._by_version = MappingProxyType(by_version)
+        self._active_by_profile = MappingProxyType(active)
+
+    def __getitem__(self, version_id: UUID) -> KnowledgePack:
+        return self._by_version[version_id]
+
+    def __iter__(self) -> Iterator[UUID]:
+        return iter(self._by_version)
+
+    def __len__(self) -> int:
+        return len(self._by_version)
+
+    def active_for_profile(self, profile_version_id: str) -> KnowledgePack | None:
+        return self._active_by_profile.get(profile_version_id)
 
 
 def validate_knowledge_pack(

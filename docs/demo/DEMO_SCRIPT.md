@@ -1,33 +1,31 @@
 # SIH 26155 Demo Script
 
-Target runtime: approximately 120 seconds. Use one Cisco IOS XE 17.x device
-and one FortiOS 7.x device with prepared evidence.
+Target runtime: approximately 180 seconds. Use the five repository-safe files
+in `demo/configurations/`.
 
 ## 0-15 Seconds: Fleet View
 
-Show the dashboard and device list. Say: "This is an evidence-first,
-multi-vendor auditor for Cisco IOS XE 17.x and FortiOS 7.x. Both vendors use
-their own structural reader, then converge into one canonical compliance path."
+Show the dashboard and device list. Identify Cisco IOS XE, FortiOS, Junos, and
+Arista EOS as bounded profiles converging into one canonical compliance path.
 
 ## 15-35 Seconds: One Batch, Multiple Devices
 
-Submit the Cisco and FortiOS snapshots together through the batch workflow.
-Point out the two per-device results, independent audit IDs, and independent
-jobs. Say: "This is a real multi-device submission, not multiple files being
-treated as one device. A rejected item would be reported without discarding a
-valid item."
+Upload the four vendor files as separate snapshots. Select CIS where applicable
+to Cisco and select NIST, DISA, and ISO alignment for the supported profiles.
+Point out independent audit IDs and honest automatic/manual/unimplemented counts.
 
 ## 35-60 Seconds: Findings and Remediation
 
 Open the resulting findings. Show PASS, FAIL, and UNKNOWN where present,
-severity, observed evidence, and a selected NIST reference. Open a Cisco FAIL
-and preview the reviewed SSH v2, remote logging, or NTP procedure. Say:
+severity, observed evidence, and selected control IDs. Open the Telnet FAIL for
+each vendor and preview the reviewed procedure. Say:
 "The compliance result is deterministic. The remediation is a reviewed preview;
 the system does not execute commands."
 
 ## 60-85 Seconds: Review Center
 
-Open an unresolved syntax item. Show its evidence and candidate fields, then
+Upload `unknown-vendor.cfg`. Open its unresolved syntax item, show raw evidence
+and candidate fields, then
 request the optional AI suggestion if the environment exposes the disabled
 provider state. Say: "AI assistance is advisory. The administrator edits or
 reviews the mapping, runs deterministic validation, and approves publication."
@@ -41,9 +39,7 @@ remains available for comparison."
 
 ## 105-120 Seconds: Report and Close
 
-Generate the PDF report. Show Device Identification, hostname, vendor,
-software version, model or serial when persisted, findings, evidence, severity,
-NIST mappings, and remediation data. Close with: "The value is traceable,
-deterministic compliance evidence across two vendors, with supervised learning
-and immutable history. The result is mapped to selected NIST SP 800-53 Rev. 5
-controls; it is not a claim of certification or full framework compliance."
+Generate a PDF report. Show device identity, selected frameworks and controls,
+coverage counts, evidence, severity, and rendered remediation/verification/
+rollback commands. Close by stating that unavailable CIS/ISO source controls
+remain manual or unimplemented and this is not certification.

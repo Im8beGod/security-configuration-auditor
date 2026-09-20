@@ -82,4 +82,4 @@ end
             for item in facts
         )
     assert _values(cisco, "management.session.idle_timeout") == _values(fortios, "management.session.idle_timeout") == [600]
-    assert [len(_states(facts)) for facts in (cisco, fortios, junos)] == [6, 7, 4]
+    assert [len(_states(facts)) for facts in (cisco, fortios, junos)] == [6, 8, 4]

@@ -124,14 +124,31 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
             return [Paragraph("Reviewed remediation", subheading), labeled_table([("Status", "Not required for this finding")])]
         if status not in {"applicable", "requires_parameters"}:
             return [Paragraph("Reviewed remediation", subheading), labeled_table([("Status", f"{UNAVAILABLE} ({scalar(remediation.get('reason'), 'reason not provided')})")])]
-        steps = remediation.get("ordered_steps")
+        steps = remediation.get("rendered_steps") or remediation.get("ordered_steps")
         if not isinstance(steps, list) or not steps:
             return [Paragraph("Reviewed remediation", subheading), labeled_table([("Status", "Applicable procedure has no ordered steps")])]
-        rows = [("Status", scalar(status)), ("Procedure", scalar(remediation.get("title"))), ("Selection", scalar(remediation.get("selection_source")))]
-        story = [Paragraph("Reviewed remediation", subheading), labeled_table(rows), Paragraph("Ordered guidance", styles["Heading4"])]
+        rows = [
+            ("Status", scalar(status)), ("Procedure", scalar(remediation.get("title"))),
+            ("Objective", scalar(remediation.get("security_objective"))),
+            ("Prerequisites", format_readable(remediation.get("prerequisites"))),
+            ("Warnings", format_readable(remediation.get("safety_warnings"))),
+            ("Selection", scalar(remediation.get("selection_source"))),
+        ]
+        story = [Paragraph("Reviewed remediation", subheading), labeled_table(rows), Paragraph("Rendered commands", styles["Heading4"])]
+
+        def add_steps(title: str, values: Any) -> None:
+            if not isinstance(values, list) or not values:
+                return
+            story.append(Paragraph(title, styles["Heading4"]))
+            for index, step in enumerate(values, 1):
+                step_text = step.get("text") if isinstance(step, dict) else step
+                story.append(Paragraph(f"{index}. {scalar(step_text, UNAVAILABLE)}", body))
+
         for index, step in enumerate(steps, 1):
-            step_text = step.get("text") if isinstance(step, dict) else None
+            step_text = step.get("text") if isinstance(step, dict) else step
             story.append(Paragraph(f"{index}. {scalar(step_text, UNAVAILABLE)}", body))
+        add_steps("Verification", remediation.get("rendered_verification_steps") or remediation.get("verification_steps"))
+        add_steps("Rollback", remediation.get("rendered_rollback_steps") or remediation.get("rollback_steps"))
         return story
 
     audit, device = document["audit"], document["device"]
@@ -147,8 +164,8 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
             ("Verdict summary", format_counts(audit.get("verdict_counts"), verdict=True)),
             ("Severity summary", format_counts(audit.get("severity_counts"))),
             ("Pinned profile", scalar(audit.get("profile"))),
-            ("Coverage", format_readable(audit.get("coverage"))),
-            ("Assessment Pack", format_readable(audit.get("assessment"))),
+            ("Framework coverage", format_counts(audit.get("coverage"))),
+            ("Selected frameworks", format_readable((audit.get("assessment") or {}).get("frameworks") or audit.get("assessment"))),
         ]),
         Paragraph("Device identity", heading),
         labeled_table([
@@ -192,12 +209,20 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
         story.append(Paragraph("Assessment pack results", styles["Heading1"]))
         for item in assessment_results:
             story.append(labeled_table([
+                ("Framework", scalar(item.get("framework"))),
                 ("Obligation", _escape(str(item.get("obligation_key") or MISSING))),
                 ("Control", _escape(" ".join(str(value) for value in (item.get("control_id"), item.get("control_title")) if value) or MISSING)),
+                ("Framework version", scalar(item.get("framework_version"))),
+                ("Source URL", scalar(item.get("source_url"))),
+                ("Source digest", scalar(item.get("source_digest"))),
+                ("Severity", scalar(item.get("severity"))),
+                ("Scope", scalar(item.get("scope"))),
                 ("Assessment mode", scalar(item.get("assessment_method"))),
                 ("Implementation", scalar(item.get("implementation_status"))),
                 ("Result", scalar(item.get("verdict"), "Manual / unimplemented")),
-                ("State / evidence", format_readable((item.get("details") or {}).get("effective_state") or item.get("details"))),
+                ("Explanation", format_readable((item.get("details") or {}).get("explanation") or (item.get("details") or {}).get("state"))),
+                ("Evidence references", evidence_text((item.get("details") or {}).get("evidence_refs"))),
+                ("State / provenance", format_readable((item.get("details") or {}).get("effective_state") or item.get("details"))),
             ]))
 
     SimpleDocTemplate(

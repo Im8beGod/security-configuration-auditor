@@ -49,6 +49,12 @@ class AssessmentObligation(Base):
     assessment_pack_version_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("assessment_pack_versions.assessment_pack_version_id", ondelete="RESTRICT"), nullable=False, index=True)
     obligation_key: Mapped[str] = mapped_column(String(255), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    framework_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source_digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    control_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope: Mapped[str] = mapped_column(String(512), nullable=False)
     applicability: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     assessment_method: Mapped[str] = mapped_column(String(16), nullable=False)
     implementation_status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -63,6 +69,21 @@ class AuditAssessment(Base):
 
     __tablename__ = "audit_assessments"
     audit_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("audits.audit_id", ondelete="RESTRICT"), primary_key=True)
+    organization_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("organizations.organization_id", ondelete="RESTRICT"), nullable=False, index=True)
+    assessment_pack_version_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("assessment_pack_versions.assessment_pack_version_id", ondelete="RESTRICT"), nullable=False, index=True)
+    profile_version_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    pinned_identity: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class AuditFrameworkAssessment(Base):
+    """One immutable selected framework pack for a multi-framework Audit."""
+
+    __tablename__ = "audit_framework_assessments"
+    __table_args__ = (UniqueConstraint("audit_id", "assessment_pack_version_id"),)
+
+    audit_framework_assessment_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    audit_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("audits.audit_id", ondelete="RESTRICT"), nullable=False, index=True)
     organization_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("organizations.organization_id", ondelete="RESTRICT"), nullable=False, index=True)
     assessment_pack_version_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("assessment_pack_versions.assessment_pack_version_id", ondelete="RESTRICT"), nullable=False, index=True)
     profile_version_id: Mapped[str] = mapped_column(String(255), nullable=False)

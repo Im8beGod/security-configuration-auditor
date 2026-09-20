@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import Audit, Finding, RemediationProcedure, RemediationProcedureStatus, User
 from app.findings.service import FindingNotFoundError, _finding
-from app.remediation.catalog import REVIEWED_CISCO_PROCEDURES_BY_RULE
+from app.remediation.catalog import REMEDIATION_PROCEDURE_REGISTRY
 
 class RemediationError(ValueError): pass
 _PLACEHOLDER = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
@@ -32,26 +32,64 @@ def _validate_procedure(procedure):
     for item in procedure.required_parameters:
         if not isinstance(item, dict) or item.get("type") not in {"ip_address", "ip_network", "hostname", "integer", "port", "enum"} or not isinstance(item.get("name"), str): raise RemediationError("invalid_registry_entry")
         names.append(item["name"])
-    if len(names) != len(set(names)) or not procedure.source_references or not procedure.validation_results: raise RemediationError("invalid_registry_entry")
-    text = "\n".join(step.get("text", "") for step in procedure.ordered_steps if isinstance(step, dict))
+    sections = tuple(
+        getattr(procedure, name, [])
+        for name in ("ordered_steps", "verification_steps", "rollback_steps")
+    )
+    if (
+        len(names) != len(set(names)) or not getattr(procedure, "source_references", None)
+        or not getattr(procedure, "validation_results", None)
+        or not getattr(procedure, "prerequisites", None)
+        or not getattr(procedure, "safety_warnings", None)
+        or any(not section for section in sections)
+    ): raise RemediationError("invalid_registry_entry")
+    text = "\n".join(
+        step.get("text", "") for section in sections for step in section
+        if isinstance(step, dict)
+    )
     if not all(name in names for name in _PLACEHOLDER.findall(text)): raise RemediationError("invalid_registry_entry")
+
+def _validate_registry_identity(procedure):
+    if (
+        getattr(procedure, "schema_version", None) != "1.0.0"
+        or not isinstance(getattr(procedure, "procedure_id", None), UUID)
+        or procedure.procedure_id.int == 0
+        or not isinstance(getattr(procedure, "procedure_key", None), str)
+        or not procedure.procedure_key.strip()
+        or not isinstance(getattr(procedure, "version", None), int)
+        or procedure.version < 1
+        or not isinstance(getattr(procedure, "rule_id", None), str)
+        or not procedure.rule_id.strip()
+    ):
+        raise RemediationError("invalid_registry_entry")
 
 def _select(db, finding, audit):
     if finding.remediation_procedure_id:
         procedure = db.get(RemediationProcedure, finding.remediation_procedure_id)
         if not procedure or procedure.status not in {RemediationProcedureStatus.PUBLISHED, RemediationProcedureStatus.SUPERSEDED}: return None, "invalid_registry_entry", None
+        if procedure.rule_id != finding.rule_id: return None, "invalid_registry_entry", None
         source = "explicit_finding_reference"
     else:
         candidates = list(db.scalars(select(RemediationProcedure).where(RemediationProcedure.rule_id == finding.rule_id, RemediationProcedure.status == RemediationProcedureStatus.PUBLISHED)))
         applicable = [candidate for candidate in candidates if _applicable(candidate, finding, audit)[0]]
         if not applicable:
-            procedure = REVIEWED_CISCO_PROCEDURES_BY_RULE.get(finding.rule_id)
-            if procedure is None: return None, "no_published_procedure", None
+            procedure = REMEDIATION_PROCEDURE_REGISTRY.for_rule(
+                finding.rule_id, _profile(audit)
+            )
+            if procedure is None:
+                reason = (
+                    "unsupported_profile"
+                    if REMEDIATION_PROCEDURE_REGISTRY.by_rule.get(finding.rule_id)
+                    else "no_published_procedure"
+                )
+                return None, reason, None
             source = "built_in_reviewed_catalog"
         elif len(applicable) != 1: return None, "ambiguous_procedure", None
         else:
             procedure, source = applicable[0], "published_registry_resolution"
-    try: _validate_procedure(procedure)
+    try:
+        _validate_registry_identity(procedure)
+        _validate_procedure(procedure)
     except RemediationError as error: return None, str(error), None
     ok, reason = _applicable(procedure, finding, audit)
     return (procedure, None, source) if ok else (None, reason, None)
@@ -60,7 +98,10 @@ def _response(finding, procedure=None, reason=None, source=None):
     if finding.verdict != FindingVerdict.FAIL: return {"status": "not_required", "reason": "non_fail_verdict", "finding_id": finding.finding_id}
     if not procedure: return {"status": "unavailable", "reason": reason, "finding_id": finding.finding_id}
     required = [item for item in procedure.required_parameters if item.get("required", True)]
-    return {"status": "requires_parameters" if required else "applicable", "reason": None, "finding_id": finding.finding_id, "procedure_id": procedure.procedure_id, "procedure_key": procedure.procedure_key, "procedure_version": procedure.version, "title": procedure.title, "security_objective": procedure.security_objective, "description": procedure.description, "profile_applicability": procedure.profile_applicability, "prerequisites": procedure.prerequisites, "safety_warnings": procedure.safety_warnings, "required_parameters": procedure.required_parameters, "configuration_context": procedure.configuration_context, "ordered_steps": procedure.ordered_steps, "verification_steps": procedure.verification_steps, "rollback_steps": procedure.rollback_steps, "source_references": procedure.source_references, "validation_results": procedure.validation_results, "reviewed_at": procedure.reviewed_at, "validated_at": procedure.validated_at, "selection_source": source}
+    response = {"status": "requires_parameters" if required else "applicable", "reason": None, "finding_id": finding.finding_id, "procedure_id": procedure.procedure_id, "procedure_key": procedure.procedure_key, "procedure_version": procedure.version, "title": procedure.title, "security_objective": procedure.security_objective, "description": procedure.description, "profile_applicability": procedure.profile_applicability, "prerequisites": procedure.prerequisites, "safety_warnings": procedure.safety_warnings, "required_parameters": procedure.required_parameters, "configuration_context": procedure.configuration_context, "ordered_steps": procedure.ordered_steps, "verification_steps": procedure.verification_steps, "rollback_steps": procedure.rollback_steps, "source_references": procedure.source_references, "validation_results": procedure.validation_results, "reviewed_at": procedure.reviewed_at, "validated_at": procedure.validated_at, "selection_source": source}
+    if not required:
+        response.update(_render_sections(procedure, {}))
+    return response
 
 def get_remediation(db: Session, user: User, finding_id: UUID):
     finding = _finding(db, user, finding_id); audit = db.get(Audit, finding.audit_id)
@@ -87,6 +128,26 @@ def _value(definition, value):
     if kind == "enum" and value in definition.get("values", []): return value
     raise RemediationError("invalid_parameters")
 
+
+def _render_section(steps, values):
+    rendered = []
+    for step in steps:
+        text = step.get("text") if isinstance(step, dict) else None
+        if not isinstance(text, str): raise RemediationError("invalid_registry_entry")
+        try:
+            rendered.append(_PLACEHOLDER.sub(lambda match: values[match.group(1)], text))
+        except KeyError as exc:
+            raise RemediationError("missing_required_parameters") from exc
+    return rendered
+
+
+def _render_sections(procedure, values):
+    return {
+        "rendered_steps": _render_section(procedure.ordered_steps, values),
+        "rendered_verification_steps": _render_section(procedure.verification_steps, values),
+        "rendered_rollback_steps": _render_section(procedure.rollback_steps, values),
+    }
+
 def preview_remediation(db, user, finding_id, parameters):
     finding = _finding(db, user, finding_id); audit = db.get(Audit, finding.audit_id); procedure, reason, source = _select(db, finding, audit)
     base = _response(finding, procedure, reason, source)
@@ -97,9 +158,4 @@ def preview_remediation(db, user, finding_id, parameters):
     for name, definition in definitions.items():
         if definition.get("required", True) and name not in parameters: raise RemediationError("missing_required_parameters")
         if name in parameters: values[name] = _value(definition, parameters[name])
-    rendered = []
-    for step in procedure.ordered_steps:
-        text = step.get("text") if isinstance(step, dict) else None
-        if not isinstance(text, str): raise RemediationError("invalid_registry_entry")
-        rendered.append(_PLACEHOLDER.sub(lambda match: values[match.group(1)], text))
-    return {**base, "status": "applicable", "rendered_steps": rendered}
+    return {**base, "status": "applicable", **_render_sections(procedure, values)}

@@ -39,6 +39,33 @@ jobs:
       SIH_PERSISTENCE_POSTGRES_TEST: "1"
       SIH_JOBS_POSTGRES_TEST: "1"
       SIH_WORKER_POSTGRES_TEST: "1"
+      SIH_ARISTA_POSTGRES_TEST: "1"
+      SIH_ARTIFACT_POSTGRES_TEST: "1"
+      SIH_B1_POSTGRES_TEST: "1"
+      SIH_AUDIT_POSTGRES_TEST: "1"
+      SIH_B10_POSTGRES_TEST: "1"
+      SIH_TRAINING_POSTGRES_TEST: "1"
+      SIH_STEP13_POSTGRES_TEST: "1"
+      SIH_B6_POSTGRES_TEST: "1"
+      SIH_B7_POSTGRES_TEST: "1"
+      SIH_B8_POSTGRES_TEST: "1"
+      SIH_B9_POSTGRES_TEST: "1"
+      SIH_BATCH_AUDIT_POSTGRES_TEST: "1"
+      SIH_STEP7_POSTGRES_TEST: "1"
+      SIH_DASHBOARD_POSTGRES_TEST: "1"
+      SIH_STEP6_POSTGRES_TEST: "1"
+      SIH_STEP8_POSTGRES_TEST: "1"
+      SIH_PHASE3_POSTGRES_TEST: "1"
+      SIH_PHASE4_POSTGRES_TEST: "1"
+      SIH_PHASE5_POSTGRES_TEST: "1"
+      SIH_B2_POSTGRES_TEST: "1"
+      SIH_PROFILE_POSTGRES_TEST: "1"
+      SIH_STEP12_POSTGRES_TEST: "1"
+      SIH_INTERPRETATION_POSTGRES_TEST: "1"
+      SIH_WORKFLOW_POSTGRES_TEST: "1"
+      SIH_STEP4_POSTGRES_TEST: "1"
+      SIH_STEP5_POSTGRES_TEST: "1"
+      SIH_T2_POSTGRES_TEST: "1"
 
     defaults:
       run:
@@ -61,8 +88,10 @@ jobs:
       - name: Apply and verify migrations
         run: |
           alembic -c ../database/alembic.ini upgrade head
-          alembic -c ../database/alembic.ini heads | grep -F "20260909_0020 (head)"
-          alembic -c ../database/alembic.ini current | grep -F "20260909_0020 (head)"
+          alembic -c ../database/alembic.ini downgrade 20260909_0020
+          alembic -c ../database/alembic.ini upgrade head
+          alembic -c ../database/alembic.ini heads | grep -F "20260920_0023 (head)"
+          alembic -c ../database/alembic.ini current | grep -F "20260920_0023 (head)"
 
       - name: Run tests
         run: python -m pytest -v

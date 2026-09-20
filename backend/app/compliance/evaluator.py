@@ -25,7 +25,20 @@ def evaluate_condition(rule: RuleDefinition, value: dict[str, Any], parameter: A
             raise EvaluationError("TypedValue is incompatible with duration rule")
         if isinstance(parameter, bool) or not isinstance(parameter, (int, float)):
             raise EvaluationError("Policy maximum is malformed")
-        return FindingVerdict.PASS if candidate <= parameter else FindingVerdict.FAIL
+        minimum = rule.condition.get("minimum_exclusive")
+        if minimum is not None and (
+            isinstance(minimum, bool) or not isinstance(minimum, (int, float))
+        ):
+            raise EvaluationError("Rule minimum is malformed")
+        return FindingVerdict.PASS if (
+            (minimum is None or candidate > minimum) and candidate <= parameter
+        ) else FindingVerdict.FAIL
+    if operator == "enum_at_least":
+        order = rule.condition.get("order")
+        expected = rule.condition.get("expected")
+        if value_type != TypedValueType.ENUM.value or not isinstance(candidate, str) or not isinstance(order, list) or candidate not in order or expected not in order:
+            raise EvaluationError("TypedValue is incompatible with ordered-enum rule")
+        return FindingVerdict.PASS if order.index(candidate) >= order.index(expected) else FindingVerdict.FAIL
     if operator in {"non_empty", "all_members_in_parameter_set"}:
         if value_type != TypedValueType.LIST.value or not isinstance(candidate, list):
             raise EvaluationError("TypedValue is incompatible with collection rule")

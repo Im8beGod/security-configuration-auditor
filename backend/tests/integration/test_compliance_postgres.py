@@ -46,7 +46,7 @@ def test_findings_are_deterministic_unique_and_retryable_only_while_processing()
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260908_0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(factory, "Step 7", f"step7-{suffix}", f"step7-{suffix}@example.invalid", "test-only-password")
         with factory.begin() as db:
@@ -74,8 +74,8 @@ def test_findings_are_deterministic_unique_and_retryable_only_while_processing()
             policy = OrganizationPolicyRegistry().register(organization_id=organization_id, name="test", version="1.0.0", parameters={"maximum_admin_idle_timeout_seconds": 300, "approved_logging_destinations": ["192.0.2.1"], "approved_ntp_servers": ["192.0.2.2"]})
             first = persist_audit_findings(db, audit_id=audit.audit_id, organization_id=organization_id, rule_pack=RULE_PACK, organization_policy=policy)
             first_ids = {item.finding_id for item in first}
-            assert len(first) == 9  # Telnet produces one finding for each canonical VTY range.
-            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.audit_id == audit.audit_id)) == 9
+            assert len(first) == 18
+            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.audit_id == audit.audit_id)) == 18
             second = persist_audit_findings(db, audit_id=audit.audit_id, organization_id=organization_id, rule_pack=RULE_PACK, organization_policy=policy)
             assert {item.finding_id for item in second} == first_ids
             duplicate_values = {column.name: getattr(second[0], column.name) for column in Finding.__table__.columns}

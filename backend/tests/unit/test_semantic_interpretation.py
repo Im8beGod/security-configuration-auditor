@@ -1,13 +1,19 @@
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 from app.db.models import (
+    ArtifactEvidenceType,
     FactState,
     FactValidationStatus,
     InterpretationConfidence,
     InterpretationMethod,
 )
 from app.interpretation import InterpretationContext, interpret_structural_ir
+from app.interpretation.service import (
+    _persist_unresolved_blocks,
+    load_validated_knowledge_pack,
+)
 from app.parsing import (
     INDENTATION_CLI_READER_ID,
     ArtifactProvenance,
@@ -165,6 +171,87 @@ def test_invalid_extractors_negation_and_unknown_nodes_produce_no_fabricated_fac
     assert result.facts == ()
     assert result.metrics.facts_produced == 0
     assert result.metrics.unsupported_cases >= 4
+
+
+def test_opaque_configuration_is_retained_as_unresolved_evidence():
+    ir, result = _interpret(
+        "banner motd ^C\n"
+        "line vty 0 4\n"
+        " transport input telnet\n"
+        "^C\n"
+        "ip ssh version 2\n"
+    )
+    opaque = next(node for node in ir.nodes if node.kind.value == "opaque")
+
+    assert opaque.node_id in result.unresolved_node_ids
+    assert all(opaque.node_id not in fact.source_ir_node_ids for fact in result.facts)
+
+
+def test_unresolved_mapping_evidence_persists_affected_rule_ids():
+    ir, result = _interpret("line vty 0 4\n exec-timeout never 0\n")
+
+    class Db:
+        def __init__(self):
+            self.added = []
+
+        def scalar(self, _statement):
+            return None
+
+        def add(self, value):
+            self.added.append(value)
+
+    db = Db()
+    _persist_unresolved_blocks(
+        db,
+        organization_id=UUID(int=505),
+        context=InterpretationContext(AUDIT_ID, DEVICE_ID, SNAPSHOT_ID),
+        profile_id=CISCO_IOS_XE_17.profile_id,
+        profile_version_id=CISCO_IOS_XE_17.profile_version_id,
+        parsed_irs=[ir],
+        results=[result],
+        knowledge_pack=load_validated_knowledge_pack(CISCO_IOS_XE_17.profile_version_id),
+        unsupported_artifacts=[],
+    )
+
+    timeout = next(item for item in db.added if item.occurrence.get("command") == "exec-timeout")
+    assert timeout.candidate_field_ids == ["management.session.idle_timeout"]
+    assert timeout.affected_rule_ids == ["management.idle_timeout.maximum"]
+
+
+def test_unsupported_configuration_artifact_persists_global_uncertainty():
+    class Db:
+        def __init__(self):
+            self.added = []
+
+        def scalar(self, _statement):
+            return None
+
+        def add(self, value):
+            self.added.append(value)
+
+    artifact = SimpleNamespace(
+        artifact_id=ARTIFACT_ID,
+        original_filename="unknown.txt",
+        evidence_type=ArtifactEvidenceType.UNKNOWN_EVIDENCE,
+        sha256="b" * 64,
+    )
+    db = Db()
+    _persist_unresolved_blocks(
+        db,
+        organization_id=UUID(int=505),
+        context=InterpretationContext(AUDIT_ID, DEVICE_ID, SNAPSHOT_ID),
+        profile_id=CISCO_IOS_XE_17.profile_id,
+        profile_version_id=CISCO_IOS_XE_17.profile_version_id,
+        parsed_irs=[],
+        results=[],
+        knowledge_pack=load_validated_knowledge_pack(CISCO_IOS_XE_17.profile_version_id),
+        unsupported_artifacts=[(artifact, "frobnicate tunnel lunar-mode")],
+    )
+
+    block = db.added[0]
+    assert block.unknown_reason == "unsupported_configuration_evidence"
+    assert "management.idle_timeout.maximum" in block.affected_rule_ids
+    assert block.evidence_refs[0]["artifact_id"] == str(ARTIFACT_ID)
 
 
 def test_fact_identity_and_full_provenance_are_stable():

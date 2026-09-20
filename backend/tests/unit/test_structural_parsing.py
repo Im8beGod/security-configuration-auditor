@@ -23,6 +23,7 @@ from app.parsing import (
     parse_configuration_text,
 )
 from app.parsing.readers import indentation_cli
+from app.parsing.reader_registry import StructuralReaderRegistry
 from app.profile_resolution import CISCO_IOS_XE_17
 
 
@@ -345,3 +346,19 @@ def test_profile_references_reader_and_production_audit_jobs_remain_unclaimed():
     assert "structural_parsing" in CISCO_IOS_XE_17.capabilities
     assert CISCO_IOS_XE_17.coverage_manifest["structural_parsing"] is True
     assert JobType.AUDIT not in PRODUCTION_HANDLERS
+
+
+def test_structural_reader_registry_requires_explicit_nonconflicting_versions():
+    class Reader:
+        reader_id = "example.v1"
+
+        def parse(self, request):
+            return request
+
+    first = Reader()
+    assert StructuralReaderRegistry((first,))["example.v1"] is first
+    with pytest.raises(ValueError, match="conflicts"):
+        StructuralReaderRegistry((first, Reader()))
+    first.reader_id = "unversioned"
+    with pytest.raises(ValueError, match="identity"):
+        StructuralReaderRegistry((first,))

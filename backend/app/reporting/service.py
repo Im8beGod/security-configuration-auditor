@@ -2,7 +2,7 @@ import hashlib
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.db.models import AssessmentObligation, AssessmentResult, Audit, AuditAssessment, AssessmentPackVersion, AuditStatus, Device, Finding, Report, ReportStatus, User
+from app.db.models import AssessmentObligation, AssessmentResult, Audit, AuditAssessment, AuditFrameworkAssessment, AssessmentPackVersion, AuditStatus, Device, Finding, Report, ReportStatus, User
 from app.db.models.common import utc_now
 from app.jobs.enums import JobType
 from app.jobs.service import enqueue_job
@@ -87,24 +87,31 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
     assessment = {}
     assessment_results = []
     pinned = db.get(AuditAssessment, audit.audit_id)
-    if pinned is not None:
-        pack = db.get(AssessmentPackVersion, pinned.assessment_pack_version_id)
-        if pack is not None:
+    framework_pins = list(db.scalars(select(AuditFrameworkAssessment).where(AuditFrameworkAssessment.audit_id == audit.audit_id)))
+    pack_ids = [item.assessment_pack_version_id for item in framework_pins] or ([pinned.assessment_pack_version_id] if pinned is not None else [])
+    if pack_ids:
+        packs = list(db.scalars(select(AssessmentPackVersion).where(AssessmentPackVersion.assessment_pack_version_id.in_(pack_ids))))
+        if packs:
+            packs_by_id = {pack.assessment_pack_version_id: pack for pack in packs}
             assessment = {
-                "assessment_pack_version_id": str(pack.assessment_pack_version_id),
-                "family": pack.family, "name": pack.name, "version": pack.version,
-                "source_version_label": pack.source_version_label,
-                "content_digest": pack.content_digest,
+                "frameworks": [{"assessment_pack_version_id": str(pack.assessment_pack_version_id), "family": pack.family, "name": pack.name, "version": pack.version, "source_version_label": pack.source_version_label, "source_url": (pack.source_metadata or {}).get("official_source_url") or (pack.source_metadata or {}).get("source_url") or (pack.source_metadata or {}).get("iso_open_data_url"), "content_digest": pack.content_digest} for pack in packs],
             }
             rows = db.execute(select(AssessmentResult, AssessmentObligation).join(
                 AssessmentObligation,
                 AssessmentResult.assessment_obligation_id == AssessmentObligation.assessment_obligation_id,
             ).where(AssessmentResult.audit_id == audit.audit_id).order_by(AssessmentObligation.obligation_key)).all()
             assessment_results = [{
+                "framework": packs_by_id[obligation.assessment_pack_version_id].family,
+                "framework_name": packs_by_id[obligation.assessment_pack_version_id].name,
                 "obligation_key": obligation.obligation_key,
                 "title": obligation.title,
-                "control_id": (obligation.source_reference or {}).get("control_id"),
-                "control_title": (obligation.source_reference or {}).get("control_title"),
+                "control_id": obligation.control_id,
+                "control_title": (obligation.source_reference or {}).get("control_title", obligation.title),
+                "framework_version": obligation.framework_version,
+                "source_url": obligation.source_url,
+                "source_digest": obligation.source_digest,
+                "severity": obligation.severity,
+                "scope": obligation.scope,
                 "assessment_method": result.assessment_method,
                 "implementation_status": result.implementation_status,
                 "verdict": result.verdict,

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -68,10 +68,15 @@ async def upload_artifact(
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
     storage: Annotated[ArtifactStorage, Depends(get_artifact_storage)],
+    vendor_label: Annotated[str | None, Form(max_length=128)] = None,
+    os_label: Annotated[str | None, Form(max_length=128)] = None,
 ) -> Artifact:
     try:
         data = await _read_bounded(file, settings.artifact_max_upload_bytes)
-        return ingest_artifact(db, storage, user, data, file.filename, file.content_type)
+        return ingest_artifact(
+            db, storage, user, data, file.filename, file.content_type,
+            source_metadata={"vendor_label": vendor_label, "os_label": os_label},
+        )
     except IngestionError as error:
         raise _http_error(error) from None
     finally:

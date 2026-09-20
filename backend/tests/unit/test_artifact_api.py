@@ -80,6 +80,22 @@ def test_upload_persists_canonical_metadata_bytes_and_duplicates(artifact_contex
         assert db.scalar(select(func.count()).select_from(Artifact)) == 2
 
 
+def test_upload_retains_bounded_administrator_platform_labels(artifact_context):
+    client, _factory, _storage, _identity, _other = artifact_context
+    login(client)
+    response = client.post(
+        "/api/v1/artifacts/upload",
+        files={"file": ("unknown.cfg", b"nebula-ssh enable\n", "text/plain")},
+        data={"vendor_label": "Nebula Networks", "os_label": "StarOS"},
+    )
+    assert response.status_code == 201
+    assert response.json()["source_metadata"] == {
+        "ingestion": "authenticated_upload",
+        "vendor_label": "Nebula Networks",
+        "os_label": "StarOS",
+    }
+
+
 @pytest.mark.parametrize(("name", "data", "mime", "code"), [
     ("empty.cfg", b"", "text/plain", "empty_file"),
     ("large.cfg", b"x" * 65, "text/plain", "file_too_large"),

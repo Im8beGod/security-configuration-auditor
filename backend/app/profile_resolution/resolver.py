@@ -14,7 +14,7 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, PROFILE_REGISTRY, ProfileManifest, compatible_manifests
+from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, GENERIC_CLI, PROFILE_REGISTRY, ProfileManifest, compatible_manifests
 
 
 MAX_LINE_CHARACTERS = 4096
@@ -56,7 +56,16 @@ JUNOS_PATTERN = re.compile(
     rf"\b(?:JUNOS Software Release|Junos:)\s*\[?{VALUE_PATTERN}", re.IGNORECASE
 )
 FORTIOS_PATTERN = re.compile(rf"\bFortiOS\s+v?{VALUE_PATTERN}", re.IGNORECASE)
-ARISTA_EOS_PATTERN = re.compile(rf"\bArista\b.{{0,120}}\bEOS\b.{{0,80}}?{VALUE_PATTERN}", re.IGNORECASE)
+ARISTA_PRODUCT_PATTERN = re.compile(
+    r"^\s*Arista\s+(?:vEOS(?:-lab)?|EOS|DCS-[A-Za-z0-9._/-]+)\b", re.IGNORECASE
+)
+ARISTA_SOFTWARE_VERSION_PATTERN = re.compile(
+    rf"^\s*Software image version\s*:\s*{VALUE_PATTERN}", re.IGNORECASE
+)
+KNOWN_PLATFORM_CLAIM_PATTERN = re.compile(
+    r"\b(?:Cisco|IOS[-_ ]?XE|Fortinet|FortiOS|Juniper|Junos|Arista\s+(?:EOS|vEOS|DCS-))\b",
+    re.IGNORECASE,
+)
 FILENAME_HINT_PATTERN = re.compile(
     r"(?:^|[^a-z0-9])(?:cisco|ios[-_ ]?xe)(?:[^a-z0-9]|$)", re.IGNORECASE
 )
@@ -95,6 +104,8 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
 
     for document in evidence.documents:
         document_cisco_context = False
+        document_arista_context = False
+        arista_versions: list[tuple[str, int]] = []
         filename_signal = _signal(
             document, None, "filename_hint", "cisco_filename_hint", SignalStrength.WEAK
         )
@@ -143,7 +154,6 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
             for pattern, vendor, os_name, signal_id in (
                 (JUNOS_PATTERN, "Juniper", "Junos", "juniper_junos_version"),
                 (FORTIOS_PATTERN, "Fortinet", "FortiOS", "fortinet_fortios_version"),
-                (ARISTA_EOS_PATTERN, "Arista", "EOS", "arista_eos_version"),
             ):
                 other_match = pattern.search(match_line)
                 if other_match:
@@ -153,6 +163,19 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
                     )
                     identities.append(_Identity(vendor, os_name, other_match.group(1), signal))
                     _append_signal(signals, signal)
+
+            if document.evidence_type == ArtifactEvidenceType.VERSION_OUTPUT:
+                if ARISTA_PRODUCT_PATTERN.search(match_line):
+                    document_arista_context = True
+                    signal = _signal(
+                        document, line_number, "os_identity", "arista_eos_marker",
+                        SignalStrength.STRONGEST, ("vendor", "os"),
+                    )
+                    identities.append(_Identity("Arista", "EOS", None, signal))
+                    _append_signal(signals, signal)
+                arista_version = ARISTA_SOFTWARE_VERSION_PATTERN.search(match_line)
+                if arista_version:
+                    arista_versions.append((arista_version.group(1), line_number))
 
             if document.evidence_type in {
                 ArtifactEvidenceType.VERSION_OUTPUT,
@@ -221,6 +244,14 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
             )
             cisco_syntax_signals.append(signal)
             _append_signal(signals, signal)
+        if document_arista_context:
+            for version, line_number in arista_versions:
+                signal = _signal(
+                    document, line_number, "os_identity", "arista_eos_version",
+                    SignalStrength.STRONGEST, ("vendor", "os", "os_version"),
+                )
+                identities.append(_Identity("Arista", "EOS", version, signal))
+                _append_signal(signals, signal)
 
     _extract_manifest_xml_identity(evidence, identities, models, serials, signals)
 
@@ -231,6 +262,7 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
         cisco_syntax_signals=cisco_syntax_signals,
         signals=tuple(signals),
         unavailable_count=len(evidence.issues),
+        documents=evidence.documents,
     )
 
 
@@ -315,6 +347,7 @@ def _resolve_candidates(
     cisco_syntax_signals: list[EvidenceSignal],
     signals: tuple[EvidenceSignal, ...],
     unavailable_count: int,
+    documents: tuple[EvidenceDocument, ...],
 ) -> ProfileResolutionResult:
     identity_keys = {(item.vendor, item.os) for item in identities}
     if len(identity_keys) > 1:
@@ -425,6 +458,42 @@ def _resolve_candidates(
                 reasons=("Detected FortiOS version is outside the supported 7.x profile",),
             )
 
+        if (vendor, os_name) == ("Arista", "EOS"):
+            if version is None:
+                return _result(
+                    vendor=vendor, product_family="EOS", os_name=os_name,
+                    device_class=DeviceClass.SWITCH, signals=signals,
+                    confidence=ResolutionConfidence.MEDIUM,
+                    status=ResolutionStatus.PARTIALLY_RESOLVED,
+                    reasons=("EOS version output is required for profile applicability",),
+                )
+            candidates = compatible_manifests(vendor, os_name, version)
+            if len(candidates) > 1:
+                return _result(
+                    vendor=vendor, product_family="EOS", os_name=os_name,
+                    os_version=version, device_class=DeviceClass.SWITCH,
+                    signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
+                    status=ResolutionStatus.AMBIGUOUS,
+                    reasons=("Multiple compatible profile manifests were detected",),
+                )
+            if candidates:
+                selected = candidates[0]
+                return _result(
+                    vendor=vendor, product_family="EOS", os_name=os_name,
+                    os_version=version, device_class=DeviceClass.SWITCH,
+                    selected_profile_id=selected.profile_id,
+                    selected_profile_version_id=selected.profile_version_id,
+                    signals=signals, confidence=explicit_confidence,
+                    status=ResolutionStatus.RESOLVED,
+                )
+            return _result(
+                vendor=vendor, product_family="EOS", os_name=os_name,
+                os_version=version, device_class=DeviceClass.SWITCH,
+                signals=signals, confidence=explicit_confidence,
+                status=ResolutionStatus.UNSUPPORTED,
+                reasons=("Detected EOS version is outside the supported 4.x profile",),
+            )
+
         if version is None:
             return _result(
                 vendor=vendor, product_family=product_family, os_name=os_name,
@@ -470,6 +539,42 @@ def _resolve_candidates(
             reasons=("Cisco-like CLI syntax does not distinguish IOS from IOS XE",),
         )
 
+    configuration_documents = tuple(
+        document for document in documents
+        if document.text.strip() and document.evidence_type in {
+            ArtifactEvidenceType.CONFIGURATION,
+            ArtifactEvidenceType.UNKNOWN_EVIDENCE,
+        }
+    )
+    generic_documents = tuple(
+        document for document in configuration_documents
+        if not document.text.lstrip().startswith("<")
+        and not KNOWN_PLATFORM_CLAIM_PATTERN.search(document.text[:MAX_LINE_CHARACTERS])
+    )
+    if generic_documents and len(generic_documents) == len(configuration_documents) and not signals:
+        labels: dict[str, str] = {}
+        for key in ("vendor_label", "os_label"):
+            values = {
+                str(document.source_metadata[key]).strip()
+                for document in generic_documents
+                if document.source_metadata.get(key)
+            }
+            if len(values) == 1:
+                labels[key.removesuffix("_label")] = next(iter(values))
+        return _result(
+            vendor=GENERIC_CLI.vendor,
+            product_family=GENERIC_CLI.product_family,
+            os_name=GENERIC_CLI.os,
+            device_class=DeviceClass.UNKNOWN,
+            selected_profile_id=GENERIC_CLI.profile_id,
+            selected_profile_version_id=GENERIC_CLI.profile_version_id,
+            signals=signals,
+            confidence=ResolutionConfidence.LOW,
+            status=ResolutionStatus.RESOLVED,
+            reasons=("Generic CLI selected without inferred command semantics",),
+            metadata={"administrator_labels": labels} if labels else {},
+        )
+
     reasons = ["No authoritative platform evidence was detected"]
     if unavailable_count:
         reasons.append("One or more artifacts could not be inspected")
@@ -495,6 +600,7 @@ def _result(
     status: ResolutionStatus,
     reasons: tuple[str, ...] = (),
     conflicts: tuple[ResolutionConflict, ...] = (),
+    metadata: dict[str, object] | None = None,
 ) -> ProfileResolutionResult:
     return ProfileResolutionResult(
         vendor=vendor,
@@ -511,6 +617,7 @@ def _result(
         supporting_signals=signals,
         unresolved_reasons=reasons,
         conflicts=conflicts,
+        metadata=dict(metadata or {}),
     )
 
 

@@ -136,6 +136,25 @@ export interface Audit {
   schema_version: string
   job: JobSummary | null
   assessment: AssessmentPackSummary | null
+  assessments: AssessmentPackSummary[]
+}
+
+export interface AssessmentResult {
+  assessment_result_id: string
+  obligation_key: string
+  control_id: string
+  title: string
+  framework_version: string
+  severity: string
+  scope: string
+  source_url: string
+  source_digest: string
+  source_reference: Record<string, unknown>
+  applicability_status: string
+  assessment_method: string
+  implementation_status: string
+  verdict: string | null
+  details: Record<string, unknown>
 }
 
 export interface AssessmentPackSummary {

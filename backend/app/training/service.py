@@ -371,8 +371,15 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
     from app.effective_state.resolver import resolve_security_facts
     from app.ingestion.storage import get_artifact_storage
     from app.interpretation.knowledge_pack import KnowledgePack
-    from app.interpretation.service import _to_orm, _training_mapping, interpret_xml_structural_ir
+    from app.interpretation.service import (
+        _to_orm,
+        _training_mapping,
+        _training_validation_node,
+        interpret_structural_ir,
+        interpret_xml_structural_ir,
+    )
     from app.parsing import parse_artifact
+    from app.parsing.readers.xml_tree import XmlStructuralIR
 
     artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == evidence_artifact_id, Artifact.organization_id == mapping.organization_id))
     if artifact is None or artifact.status is not ArtifactStatus.READY or artifact.snapshot_id is None:
@@ -389,13 +396,35 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
     pack = KnowledgePack(pack_id, pack_id, "Validation candidate", "validation", "1.0.0", profile_version_id.split("@", 1)[0], profile_version_id, (mapping_adapter,))
     context_id = uuid5(NAMESPACE_URL, f"validation-audit:{mapping.mapping_version_id}:{artifact.artifact_id}")
     from app.interpretation.models import InterpretationContext
-    result = interpret_xml_structural_ir(ir, InterpretationContext(context_id, snapshot.device_id, snapshot.snapshot_id), profile_version_id=profile_version_id, knowledge_pack=pack)
+    context = InterpretationContext(context_id, snapshot.device_id, snapshot.snapshot_id)
+    result = (
+        interpret_xml_structural_ir(
+            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
+        )
+        if isinstance(ir, XmlStructuralIR)
+        else interpret_structural_ir(
+            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
+        )
+    )
     transient_facts = tuple(_to_orm(item) for item in result.facts)
     states = resolve_security_facts(audit_id=context_id, device_id=snapshot.device_id, facts=transient_facts, operations={item.fact_id: FactOperation.ASSIGN for item in transient_facts})
     matches = []
-    from app.training.dsl import matches_xml, xml_match_has_unsupported_qualifier
-    for node, captures in matches_xml(definition, ir):
-        matches.append({"path": list(node.path), "node_id": node.node_id, "captures": captures, "status": "excluded_unsupported_scope" if xml_match_has_unsupported_qualifier(definition, ir, node) else "matched"})
+    from app.training.dsl import matches as matches_cli, matches_xml, xml_match_has_unsupported_qualifier
+    if isinstance(ir, XmlStructuralIR):
+        for node, captures in matches_xml(definition, ir):
+            matches.append({"path": list(node.path), "node_id": node.node_id, "captures": captures, "status": "excluded_unsupported_scope" if xml_match_has_unsupported_qualifier(definition, ir, node) else "matched"})
+    else:
+        for node in ir.nodes:
+            if node.command is None:
+                continue
+            matched, captures = matches_cli(
+                definition,
+                _training_validation_node(
+                    node, ir, definition.scope_resolution.strategy
+                ),
+            )
+            if matched:
+                matches.append({"command": node.raw_text, "node_id": node.node_id, "captures": captures, "status": "matched"})
     facts = [{"field_id": item.field_id, "value": item.value, "state": item.state, "evidence_refs": item.evidence_refs, "mapping_version_id": str(item.mapping_version_id)} for item in transient_facts]
     effective_states = [{"field_id": item.field_id, "scope": item.scope.to_dict(), "resolution_status": item.resolution_status.value, "effective_value": item.effective_value.to_dict() if item.effective_value else None, "source_fact_ids": [str(value) for value in item.source_fact_ids]} for item in states]
     status = "matched" if matches else "no_match"

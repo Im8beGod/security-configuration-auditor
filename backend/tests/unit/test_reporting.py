@@ -121,8 +121,14 @@ def test_pdf_wraps_long_content_and_keeps_ordered_remediation_data():
         "remediation": {
             "status": "applicable",
             "title": "Reviewed procedure",
+            "security_objective": "Disable insecure management access",
             "selection_source": "built_in_reviewed_catalog",
-            "ordered_steps": [{"text": "First reviewed step"}, {"text": "Second reviewed step"}],
+            "prerequisites": [{"text": "Maintain alternate access"}],
+            "safety_warnings": ["Review before applying"],
+            "ordered_steps": [{"text": "First reviewed step"}],
+            "rendered_steps": ["configure terminal", "transport input ssh"],
+            "rendered_verification_steps": ["show running-config | section line vty"],
+            "rendered_rollback_steps": ["Restore captured configuration"],
         },
     }
     document = {
@@ -134,7 +140,7 @@ def test_pdf_wraps_long_content_and_keeps_ordered_remediation_data():
     pdf = build_device_compliance_pdf(document)
     assert pdf.startswith(b"%PDF-")
     assert pdf.count(b"/Type /Page") > 1
-    assert finding["remediation"]["ordered_steps"] == [{"text": "First reviewed step"}, {"text": "Second reviewed step"}]
+    assert finding["remediation"]["rendered_steps"] == ["configure terminal", "transport input ssh"]
 
 
 def test_cisco_and_fortios_pdf_outputs_are_generated_for_visual_review(tmp_path):

@@ -1,0 +1,5 @@
+Arista vEOS-lab
+Hardware version:
+Serial number: TEST0001
+Software image version: 4.31.2F
+Architecture: i686

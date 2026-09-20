@@ -22,7 +22,7 @@ def test_b9_alignment_is_immutable_pinned_and_multivendor():
         with pytest.raises(DatabaseError,match="immutable"): db.execute(text("UPDATE assessment_pack_versions SET name='x' WHERE assessment_pack_version_id=:id").bindparams(id=pack.assessment_pack_version_id))
         db.rollback()
       with factory.begin() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0017"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
         pack=db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key=="iso27001_2022_nist_olir_technical_alignment")); b6=db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key=="nist_sp80053_rev5_scoped_technical")); b7=db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key=="disa_ndm_srg_v5r5_scoped_technical")); b8=db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key=="cis_cisco_ios_xe_17_v2_2_1_scoped_technical")); assert pack and b6 and b7 and b8
         org=Organization(name="B9",slug=f"b9-{uuid4().hex[:12]}"); db.add(org); db.flush(); oid=org.organization_id
         user=User(organization_id=oid,email=f"b9-{uuid4().hex}@example.invalid",password_hash="test",role=UserRole.ADMIN); db.add(user); db.flush()

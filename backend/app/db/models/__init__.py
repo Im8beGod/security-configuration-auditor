@@ -47,6 +47,7 @@ from app.db.models.assessment import (
     AssessmentPackVersion,
     AssessmentResult,
     AuditAssessment,
+    AuditFrameworkAssessment,
 )
 from app.db.models.profile import ProfileManifestVersion, ProfileResolutionDecision
 from app.jobs.enums import JobStatus, JobType
@@ -97,6 +98,7 @@ __all__ = [
     "AssessmentPackVersion",
     "AssessmentResult",
     "AuditAssessment",
+    "AuditFrameworkAssessment",
     "ProfileManifestVersion",
     "ProfileResolutionDecision",
 ]

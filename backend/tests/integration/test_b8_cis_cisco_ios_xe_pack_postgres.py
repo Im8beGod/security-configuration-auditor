@@ -53,7 +53,7 @@ def test_b8_cis_pack_is_immutable_profile_constrained_and_persists_honest_verdic
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(factory, "B8 CIS Organization", f"b8-{suffix}", f"b8-{suffix}@example.invalid", "test-only-password")
         with factory() as db:
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260909_0017"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
             cis = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "cis_cisco_ios_xe_17_v2_2_1_scoped_technical"))
             nist = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "nist_sp80053_rev5_scoped_technical"))
             disa = db.scalar(select(AssessmentPackVersion).where(AssessmentPackVersion.pack_key == "disa_ndm_srg_v5r5_scoped_technical"))
@@ -85,7 +85,7 @@ def test_b8_cis_pack_is_immutable_profile_constrained_and_persists_honest_verdic
             assert audit.coverage["automatic_verdicts"] == {"pass": 5, "fail": 0, "unknown": 1} and audit.coverage["manual"] == 5
             assert results["cis-1.2.5.vty-source-restriction"].verdict == "pass"
             assert results["cis-1.2.8.vty-idle-timeout"].verdict == "unknown"
-            assert results["cis-1.2.8.vty-idle-timeout"].result_details["unknown_reason"] == "ambiguous_scope"
+            assert results["cis-1.2.8.vty-idle-timeout"].result_details["unknown_reason"] == "unsupported_feature"
             assert results["cis-2.1.1.2.ssh-version-review"].verdict is None
             source_state = db.scalar(select(EffectiveState).where(EffectiveState.audit_id == pipeline_audit_id, EffectiveState.field_id == "management.remote.source.restriction.configured"))
             assert source_state is not None and source_state.source_fact_ids

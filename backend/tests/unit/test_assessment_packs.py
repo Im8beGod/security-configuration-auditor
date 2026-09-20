@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -13,6 +14,7 @@ from app.assessment_packs.contracts import (
     coverage_summary,
     policy_digest,
 )
+from app.assessment_packs.service import AssessmentPackError, AssessmentPackRegistry
 
 
 def test_assessment_pack_and_obligation_contracts_are_immutable_and_test_scoped():
@@ -44,8 +46,24 @@ def test_coverage_keeps_manual_unimplemented_and_automatic_verdicts_separate():
         "selected_obligation_count": 5, "applicable": 3, "not_applicable": 1,
         "applicability_unknown": 1, "automatic_implemented": 3, "manual": 1,
         "unimplemented": 1, "automatic_verdicts": {"pass": 1, "fail": 0, "unknown": 1},
+        "automatic": 3, "pass": 1, "fail": 0, "unknown": 1,
     }
 
 
 def test_policy_digest_distinguishes_same_rule_with_different_parameters():
     assert policy_digest({"expected": True}) != policy_digest({"expected": False})
+
+
+def test_assessment_pack_registry_validates_persisted_version_identity():
+    profile = "cisco.ios_xe.17@1.0.0"
+    row = SimpleNamespace(
+        schema_version="1.0.0", assessment_pack_version_id=uuid4(),
+        pack_key="pack", family="family", name="name", version=1,
+        profile_version_ids=[profile], applicability={"profile_version_ids": [profile]},
+        content_digest="a" * 64,
+        source_metadata={"official_source_url": "https://example.invalid/catalog", "source_sha256": "b" * 64},
+    )
+    assert AssessmentPackRegistry.validate(row) is row
+    row.applicability = {"profile_version_ids": ["other"]}
+    with pytest.raises(AssessmentPackError, match="invalid"):
+        AssessmentPackRegistry.validate(row)

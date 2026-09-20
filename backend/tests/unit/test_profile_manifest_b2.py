@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -8,7 +9,12 @@ from app.profile_resolution import ResolutionStatus
 from app.profile_resolution.evidence import EvidenceDocument, SnapshotEvidence
 from app.db.models import ArtifactEvidenceType
 from app.profile_resolution.models import EvidenceSignal, SignalStrength
-from app.profile_resolution.registry import VersionConstraint, compatible_manifests
+from app.profile_resolution.registry import (
+    CISCO_IOS_XE_17,
+    ProfileManifestRegistry,
+    VersionConstraint,
+    compatible_manifests,
+)
 from app.profile_resolution.resolver import resolve_profile
 
 
@@ -23,6 +29,16 @@ def test_version_boundaries_exclusions_and_unknown_are_explicit():
     assert not constraint.accepts("17.2")
     assert not constraint.accepts("17.9.4a")
     assert constraint.parse("not-a-version") is None
+
+
+def test_profile_manifest_registry_rejects_schema_and_version_conflicts():
+    with pytest.raises(ValueError, match="schema"):
+        ProfileManifestRegistry((replace(CISCO_IOS_XE_17, manifest_schema_version="2.0.0"),))
+    with pytest.raises(ValueError, match="conflicts"):
+        ProfileManifestRegistry((
+            CISCO_IOS_XE_17,
+            replace(CISCO_IOS_XE_17, vendor="Changed"),
+        ))
 
 
 def test_missing_version_and_conflicting_identity_remain_reviewable():

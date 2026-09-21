@@ -136,27 +136,29 @@ def update_mapping(db: Session, user: User, mapping_version_id: UUID, *, title: 
     return mapping
 
 
-def request_validation(db: Session, user: User, mapping_version_id: UUID, *, evidence_artifact_id: UUID | None = None) -> tuple[MappingValidationRun, Job]:
+def request_validation(db: Session, user: User, mapping_version_id: UUID, *, evidence_artifact_id: UUID | None = None, negative_evidence_artifact_id: UUID | None = None) -> tuple[MappingValidationRun, Job]:
     mapping = _mapping(db, user, mapping_version_id, lock=True)
     if mapping.status not in {MappingStatus.DRAFT, MappingStatus.TESTING}:
         raise TrainingConflict("Mapping is not eligible for validation")
-    MappingDefinition.model_validate(_definition_payload(mapping))
-    if evidence_artifact_id is not None:
-        artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == evidence_artifact_id, Artifact.organization_id == user.organization_id))
-        if artifact is None or artifact.status is not ArtifactStatus.READY:
+    definition = MappingDefinition.model_validate(_definition_payload(mapping))
+    structured = definition.structural_match.operation in {"xml_path", "json_path"}
+    if structured and (evidence_artifact_id is None or negative_evidence_artifact_id is None):
+        raise TrainingConflict("Structured validation requires positive and negative evidence artifacts")
+    if evidence_artifact_id is not None and evidence_artifact_id == negative_evidence_artifact_id:
+        raise TrainingConflict("Positive and negative evidence artifacts must differ")
+    for artifact_id in (evidence_artifact_id, negative_evidence_artifact_id):
+        if artifact_id is None:
+            continue
+        artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == artifact_id, Artifact.organization_id == user.organization_id))
+        if artifact is None or artifact.status is not ArtifactStatus.READY or artifact.snapshot_id is None:
             raise TrainingConflict("Selected evidence artifact is not ready")
-        profile_ids = set((mapping.profile_applicability or {}).get("profile_version_ids", []))
-        if not profile_ids:
-            raise TrainingConflict("Profile applicability is required for evidence validation")
-        if artifact.snapshot_id is None:
-            raise TrainingConflict("Selected evidence must belong to a snapshot")
         snapshot = db.get(Snapshot, artifact.snapshot_id)
         if snapshot is None or snapshot.organization_id != user.organization_id or snapshot.status not in {SnapshotStatus.READY, SnapshotStatus.LOCKED}:
             raise TrainingConflict("Selected evidence snapshot is not ready")
-    run = MappingValidationRun(organization_id=user.organization_id, mapping_version_id=mapping.mapping_version_id, status=ValidationRunStatus.PENDING, results={"evidence_artifact_id": str(evidence_artifact_id) if evidence_artifact_id else None})
+    run = MappingValidationRun(organization_id=user.organization_id, mapping_version_id=mapping.mapping_version_id, status=ValidationRunStatus.PENDING, results={"evidence_artifact_id": str(evidence_artifact_id) if evidence_artifact_id else None, "negative_evidence_artifact_id": str(negative_evidence_artifact_id) if negative_evidence_artifact_id else None})
     db.add(run)
     db.flush()
-    job = enqueue_job(db, JobType.MAPPING_VALIDATION, payload={"mapping_version_id": str(mapping.mapping_version_id), "validation_run_id": str(run.validation_run_id), "organization_id": str(user.organization_id), "evidence_artifact_id": str(evidence_artifact_id) if evidence_artifact_id else None}, stage="mapping_validation")
+    job = enqueue_job(db, JobType.MAPPING_VALIDATION, payload={"mapping_version_id": str(mapping.mapping_version_id), "validation_run_id": str(run.validation_run_id), "organization_id": str(user.organization_id)}, stage="mapping_validation")
     mapping.status = MappingStatus.TESTING
     db.commit()
     return run, job
@@ -170,7 +172,8 @@ def execute_validation(db: Session, validation_run_id: UUID, mapping_version_id:
     run.status = ValidationRunStatus.RUNNING
     definition = MappingDefinition.model_validate(_definition_payload(mapping))
     evidence_artifact_id = run.results.get("evidence_artifact_id")
-    results = validate_definition(db, mapping, definition, evidence_artifact_id=UUID(evidence_artifact_id) if evidence_artifact_id else None)
+    negative_evidence_artifact_id = run.results.get("negative_evidence_artifact_id")
+    results = validate_definition(db, mapping, definition, evidence_artifact_id=UUID(evidence_artifact_id) if evidence_artifact_id else None, negative_evidence_artifact_id=UUID(negative_evidence_artifact_id) if negative_evidence_artifact_id else None)
     run.status = ValidationRunStatus.PASSED if results["passed"] else ValidationRunStatus.FAILED
     run.results = results
     run.completed_at = utc_now()
@@ -179,7 +182,7 @@ def execute_validation(db: Session, validation_run_id: UUID, mapping_version_id:
     return run
 
 
-def validate_definition(db: Session, mapping: MappingVersion, definition: MappingDefinition, *, evidence_artifact_id: UUID | None = None) -> dict[str, Any]:
+def validate_definition(db: Session, mapping: MappingVersion, definition: MappingDefinition, *, evidence_artifact_id: UUID | None = None, negative_evidence_artifact_id: UUID | None = None) -> dict[str, Any]:
     families: dict[str, list[dict[str, Any]]] = {name: [] for name in VALIDATION_FAMILIES}
     for example in definition.examples:
         matched, captures = matches(definition, example.node)
@@ -193,8 +196,11 @@ def validate_definition(db: Session, mapping: MappingVersion, definition: Mappin
         passed = matched == example.expected_match and (not matched or example.expected_value is None or value == example.expected_value) and error is None
         families[example.family].append({"passed": passed, "matched": matched, "value": value, "error": error})
     semantic: dict[str, Any] | None = None
+    negative_semantic: dict[str, Any] | None = None
     if evidence_artifact_id is not None:
         semantic = _validate_against_artifact(db, mapping, definition, evidence_artifact_id)
+    if negative_evidence_artifact_id is not None:
+        negative_semantic = _validate_against_artifact(db, mapping, definition, negative_evidence_artifact_id)
     relevant = repository.published_mappings(db, mapping.organization_id)
     regressions = families["regression"]
     collision = any(item.mapping_id != mapping.mapping_id and item.target_field_id == mapping.target_field_id and item.structural_match == mapping.structural_match for item in relevant)
@@ -202,11 +208,16 @@ def validate_definition(db: Session, mapping: MappingVersion, definition: Mappin
     if collision:
         family_results["regression"] = False
         regressions.append({"passed": False, "error": "published_mapping_collision"})
+    structured = definition.structural_match.operation in {"xml_path", "json_path"}
+    if structured:
+        family_results["positive"] = semantic is not None and semantic["status"] == "matched"
+        family_results["negative"] = negative_semantic is not None and negative_semantic["status"] == "no_match"
     digest = _digest(definition)
     profile_digest = _profile_digest(definition)
     content_digest = _content_digest(definition)
-    passed = all(family_results.values()) and (semantic is None or semantic["status"] == "matched")
-    return {"passed": passed, "families": family_results, "cases": families, "semantic": semantic, "definition_digest": digest, "profile_digest": profile_digest, "content_digest": content_digest, "validation_digest": _validation_digest(digest, profile_digest, content_digest, semantic.get("evidence_digest") if semantic else None)}
+    passed = (family_results["positive"] and family_results["negative"] and not collision) if structured else all(family_results.values()) and (semantic is None or semantic["status"] == "matched")
+    evidence_digest = ":".join(item["evidence_digest"] for item in (semantic, negative_semantic) if item)
+    return {"passed": passed, "families": family_results, "cases": families, "semantic": semantic, "negative_semantic": negative_semantic, "definition_digest": digest, "profile_digest": profile_digest, "content_digest": content_digest, "validation_digest": _validation_digest(digest, profile_digest, content_digest, evidence_digest or None)}
 
 
 def approve_mapping(db: Session, user: User, mapping_version_id: UUID) -> MappingVersion:
@@ -353,14 +364,16 @@ def _validation_is_current(db: Session, mapping: MappingVersion, results: dict[s
     definition_digest = _digest(definition)
     profile_digest = _profile_digest(definition)
     content_digest = _content_digest(definition)
-    evidence_digest = None
-    semantic = results.get("semantic") or {}
-    evidence_id = semantic.get("evidence_artifact_id")
-    if evidence_id:
-        artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == UUID(evidence_id), Artifact.organization_id == mapping.organization_id))
-        if artifact is None:
-            return False
-        evidence_digest = artifact.sha256
+    evidence_digests: list[str] = []
+    for key in ("semantic", "negative_semantic"):
+        semantic = results.get(key) or {}
+        evidence_id = semantic.get("evidence_artifact_id")
+        if evidence_id:
+            artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == UUID(evidence_id), Artifact.organization_id == mapping.organization_id))
+            if artifact is None:
+                return False
+            evidence_digests.append(artifact.sha256)
+    evidence_digest = ":".join(evidence_digests) or None
     return results.get("definition_digest") == definition_digest and results.get("profile_digest") == profile_digest and results.get("content_digest") == content_digest and results.get("validation_digest") == _validation_digest(definition_digest, profile_digest, content_digest, evidence_digest)
 
 
@@ -373,11 +386,13 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
         _to_orm,
         _training_mapping,
         _training_validation_node,
+        interpret_json_structural_ir,
         interpret_structural_ir,
         interpret_xml_structural_ir,
     )
     from app.parsing import parse_artifact
     from app.parsing.readers.xml_tree import XmlStructuralIR
+    from app.parsing.readers.json_tree import JsonStructuralIR
 
     artifact = db.scalar(select(Artifact).where(Artifact.artifact_id == evidence_artifact_id, Artifact.organization_id == mapping.organization_id))
     if artifact is None or artifact.status is not ArtifactStatus.READY or artifact.snapshot_id is None:
@@ -400,6 +415,10 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
             ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
         )
         if isinstance(ir, XmlStructuralIR)
+        else interpret_json_structural_ir(
+            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
+        )
+        if isinstance(ir, JsonStructuralIR)
         else interpret_structural_ir(
             ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
         )
@@ -407,10 +426,13 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
     transient_facts = tuple(_to_orm(item) for item in result.facts)
     states = resolve_security_facts(audit_id=context_id, device_id=snapshot.device_id, facts=transient_facts, operations={item.fact_id: FactOperation.ASSIGN for item in transient_facts})
     matches = []
-    from app.training.dsl import matches as matches_cli, matches_xml, xml_match_has_unsupported_qualifier
+    from app.training.dsl import matches as matches_cli, matches_json, matches_xml, xml_match_has_unsupported_qualifier
     if isinstance(ir, XmlStructuralIR):
         for node, captures in matches_xml(definition, ir):
             matches.append({"path": list(node.path), "node_id": node.node_id, "captures": captures, "status": "excluded_unsupported_scope" if xml_match_has_unsupported_qualifier(definition, ir, node) else "matched"})
+    elif isinstance(ir, JsonStructuralIR):
+        for node, captures in matches_json(definition, ir):
+            matches.append({"path": list(node.path), "node_id": node.node_id, "captures": captures, "status": "matched"})
     else:
         for node in ir.nodes:
             if node.command is None:
@@ -425,11 +447,25 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
                 matches.append({"command": node.raw_text, "node_id": node.node_id, "captures": captures, "status": "matched"})
     facts = [{"field_id": item.field_id, "value": item.value, "state": item.state, "evidence_refs": item.evidence_refs, "mapping_version_id": str(item.mapping_version_id)} for item in transient_facts]
     effective_states = [{"field_id": item.field_id, "scope": item.scope.to_dict(), "resolution_status": item.resolution_status.value, "effective_value": item.effective_value.to_dict() if item.effective_value else None, "source_fact_ids": [str(value) for value in item.source_fact_ids]} for item in states]
-    status = "matched" if matches else "no_match"
+    status = "matched" if matches and facts else "invalid_match" if matches else "no_match"
     return {"status": status, "evidence_artifact_id": str(artifact.artifact_id), "evidence_filename": artifact.original_filename, "evidence_digest": artifact.sha256, "snapshot_id": str(snapshot.snapshot_id), "profile_version_id": profile_version_id, "reader_id": ir.reader_id, "matched_paths": matches, "facts": facts, "effective_states": effective_states, "diagnostics": [{"code": item.code, "node_id": item.node_id} for item in result.diagnostics]}
 
 
 def _block_matches(definition: MappingDefinition, block: UnresolvedBlock) -> bool:
+    operation = definition.structural_match.operation
+    if operation == "xml_path":
+        actual = block.occurrence.get("xml_path")
+        expected = definition.structural_match.xml_path
+        if not isinstance(actual, list) or expected is None or len(actual) != len(expected.path):
+            return False
+        normalized = [str(item).rsplit("[", 1)[0].split("}")[-1] for item in actual]
+        return normalized == [item.local_name for item in expected.path]
+    if operation == "json_path":
+        actual = block.occurrence.get("json_path")
+        expected = definition.structural_match.json_path
+        if not isinstance(actual, list) or expected is None:
+            return False
+        return actual == [item.key if item.key is not None else item.index for item in expected.path]
     occurrence = block.occurrence
     try:
         node = ValidationNode.model_validate({"command": occurrence.get("command", "unknown"), "arguments": occurrence.get("arguments", []), "parent_command": occurrence.get("parent_command"), "ancestor_commands": occurrence.get("ancestor_commands", []), "scope_type": occurrence.get("scope_type"), "negated": occurrence.get("negated", False)})

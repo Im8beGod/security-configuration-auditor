@@ -139,7 +139,11 @@ def mapping_update(mapping_version_id: UUID, request: MappingUpdateRequest, user
 @router.post("/mappings/{mapping_version_id}/validate", response_model=ValidationRequestResponse, status_code=202)
 def mapping_validate(mapping_version_id: UUID, user: TrainingAdmin, db: Annotated[Session, Depends(get_db)], request: MappingValidationRequest | None = None):
     try:
-        run, job = request_validation(db, user, mapping_version_id, evidence_artifact_id=request.evidence_artifact_id if request else None)
+        run, job = request_validation(
+            db, user, mapping_version_id,
+            evidence_artifact_id=request.evidence_artifact_id if request else None,
+            negative_evidence_artifact_id=request.negative_evidence_artifact_id if request else None,
+        )
         return ValidationRequestResponse(validation_run_id=run.validation_run_id, job_id=job.job_id, status=run.status)
     except Exception as error:
         db.rollback(); _raise(error)

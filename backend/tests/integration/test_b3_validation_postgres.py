@@ -43,27 +43,32 @@ def test_junos_mapping_validation_is_executable_and_publishes_without_audit_pers
             admin = db.get(User, admin_id)
             device = Device(organization_id=organization_id, display_name="Juniper validation device")
             db.add(device); db.flush()
-            snapshot = Snapshot(organization_id=organization_id, device_id=device.device_id, label="B3 development evidence", grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED, snapshot_hash=sha256(uuid4().bytes).hexdigest(), artifact_count=1, source=SnapshotSource.UPLOAD, status=SnapshotStatus.READY, created_by=admin_id)
+            snapshot = Snapshot(organization_id=organization_id, device_id=device.device_id, label="B3 development evidence", grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED, snapshot_hash=sha256(uuid4().bytes).hexdigest(), artifact_count=2, source=SnapshotSource.UPLOAD, status=SnapshotStatus.READY, created_by=admin_id)
             db.add(snapshot); db.flush()
             content = b"<rpc-reply><configuration><system><services><ssh/></services></system></configuration></rpc-reply>"
             storage = LocalFilesystemArtifactStorage(tmp_path / "artifacts")
             artifact_id = uuid4()
             reference = storage.write(content, organization_id=organization_id, artifact_id=artifact_id)
             artifact = Artifact(artifact_id=artifact_id, organization_id=organization_id, snapshot_id=snapshot.snapshot_id, original_filename="b3-development.xml", storage_reference=reference, byte_size=len(content), sha256=sha256(content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.XML, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY)
-            db.add(artifact); db.flush()
+            negative_content = b"<rpc-reply><configuration><system><services/></system></configuration></rpc-reply>"
+            negative_id = uuid4()
+            negative_reference = storage.write(negative_content, organization_id=organization_id, artifact_id=negative_id)
+            negative = Artifact(artifact_id=negative_id, organization_id=organization_id, snapshot_id=snapshot.snapshot_id, original_filename="b3-negative.xml", storage_reference=negative_reference, byte_size=len(negative_content), sha256=sha256(negative_content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.XML, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY)
+            db.add_all((artifact, negative)); db.flush()
             fact_count = db.scalar(select(func.count()).select_from(SecurityFact))
             state_count = db.scalar(select(func.count()).select_from(EffectiveState))
             mapping = create_mapping(db, admin, mapping_key="juniper.ssh", title="Juniper SSH", description="Validated development mapping", definition=_ssh_definition())
             mapping_id = mapping.mapping_version_id
         with factory() as db:
             admin = db.get(User, admin_id)
-            run, _job = request_validation(db, admin, mapping_id, evidence_artifact_id=artifact_id)
+            run, _job = request_validation(db, admin, mapping_id, evidence_artifact_id=artifact_id, negative_evidence_artifact_id=negative_id)
             run_id = run.validation_run_id
         monkeypatch.setattr("app.ingestion.storage.get_artifact_storage", lambda: storage)
         with factory() as db:
             result = execute_validation(db, run_id, mapping_id, organization_id)
             assert result.status.value == "passed", result.results
             assert result.results["semantic"]["status"] == "matched"
+            assert result.results["negative_semantic"]["status"] == "no_match"
             assert result.results["semantic"]["facts"][0]["field_id"] == "management.remote.ssh.enabled"
             assert result.results["semantic"]["facts"][0]["value"]["value"] is True
             assert result.results["semantic"]["effective_states"][0]["resolution_status"] == "resolved"

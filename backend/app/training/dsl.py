@@ -79,8 +79,36 @@ class XmlPathMatch(StrictModel):
         return self
 
 
+class JsonPathSegment(StrictModel):
+    key: str | None = Field(default=None, min_length=1, max_length=128)
+    index: int | None = Field(default=None, ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def bounded_shape(self) -> "JsonPathSegment":
+        if (self.key is None) == (self.index is None):
+            raise ValueError("JSON path segment requires exactly one key or index")
+        if self.key is not None and any(ord(character) < 32 for character in self.key):
+            raise ValueError("JSON path key is invalid")
+        return self
+
+
+class JsonPathMatch(StrictModel):
+    path: list[JsonPathSegment] = Field(min_length=1, max_length=16)
+    source: Literal["presence", "value"] = "value"
+    capture: str | None = None
+    value_type: Literal["string", "integer", "number", "boolean", "ip_address"] | None = None
+
+    @model_validator(mode="after")
+    def valid_source(self) -> "JsonPathMatch":
+        if self.source == "value" and (not self.capture or not self.value_type):
+            raise ValueError("JSON value source requires a typed capture")
+        if self.capture and not IDENTIFIER.fullmatch(self.capture):
+            raise ValueError("JSON capture is invalid")
+        return self
+
+
 class StructuralMatch(StrictModel):
-    operation: Literal["command_equality", "command_prefix", "xml_path"] = "command_equality"
+    operation: Literal["command_equality", "command_prefix", "xml_path", "json_path"] = "command_equality"
     command: str = Field(min_length=1, max_length=100)
     arguments: list[ArgumentPattern] = Field(default_factory=list, max_length=32)
     minimum_arguments: int | None = Field(default=None, ge=0, le=64)
@@ -90,15 +118,20 @@ class StructuralMatch(StrictModel):
     scope_type: Literal["device", "current_scope", "parent_scope", "management_plane", "vty_range", "interface", "interface_range", "vrf", "security_zone", "global"] | None = None
     negated: bool | None = None
     xml_path: XmlPathMatch | None = None
+    json_path: JsonPathMatch | None = None
 
     @model_validator(mode="after")
     def safe_matcher(self) -> "StructuralMatch":
         if self.operation == "xml_path":
-            if self.xml_path is None:
+            if self.xml_path is None or self.json_path is not None:
                 raise ValueError("xml_path operation requires an XML path")
             return self
-        if self.xml_path is not None:
-            raise ValueError("XML path is only valid for xml_path operation")
+        if self.operation == "json_path":
+            if self.json_path is None or self.xml_path is not None:
+                raise ValueError("json_path operation requires a JSON path")
+            return self
+        if self.xml_path is not None or self.json_path is not None:
+            raise ValueError("Structured paths require a matching structured operation")
         tokens = [self.command, *self.ancestor_commands]
         if self.parent_command:
             tokens.append(self.parent_command)
@@ -199,6 +232,10 @@ class MappingDefinition(StrictModel):
             raise ValueError("extraction output type is incompatible with canonical field")
         if self.scope_resolution.strategy not in field.allowed_scope_types:
             raise ValueError("scope strategy is incompatible with canonical field")
+        if self.structural_match.operation in {"xml_path", "json_path"} and self.scope_resolution.strategy not in {"device", "global"}:
+            raise ValueError("structured mappings support only device or global scope")
+        if self.structural_match.operation != "xml_path" and self.scope_resolution.xml_unsupported_qualifier_paths:
+            raise ValueError("XML qualifier paths require an XML mapping")
         payload = self.model_dump(mode="json")
         if len(json.dumps(payload, separators=(",", ":")).encode()) > MAX_MAPPING_BYTES:
             raise ValueError("mapping definition is too large")
@@ -209,7 +246,7 @@ class MappingDefinition(StrictModel):
 
 def matches(definition: MappingDefinition, node: ValidationNode) -> tuple[bool, dict[str, Any]]:
     match = definition.structural_match
-    if match.operation == "xml_path":
+    if match.operation in {"xml_path", "json_path"}:
         return False, {}
     command_matches = node.command == match.command if match.operation == "command_equality" else node.command.startswith(match.command)
     if not command_matches or match.negated is not None and node.negated != match.negated:
@@ -305,6 +342,33 @@ def xml_match_has_unsupported_qualifier(definition: MappingDefinition, ir: Any, 
     return False
 
 
+def matches_json(definition: MappingDefinition, ir: Any) -> tuple[tuple[Any, dict[str, Any]], ...]:
+    """Return exact, bounded JSON key/index path matches."""
+    match = definition.structural_match
+    if match.operation != "json_path" or match.json_path is None:
+        return ()
+    expected = tuple(
+        segment.key if segment.key is not None else segment.index
+        for segment in match.json_path.path
+    )
+    result: list[tuple[Any, dict[str, Any]]] = []
+    for node in ir.nodes:
+        if node.path != expected:
+            continue
+        captures: dict[str, Any] = {}
+        source = match.json_path
+        raw = True if source.source == "presence" else node.value
+        if source.source == "value" and isinstance(raw, (dict, list)):
+            continue
+        if source.capture:
+            try:
+                captures[source.capture] = _typed(raw, source.value_type or "string")
+            except (TypeError, ValueError):
+                continue
+        result.append((node, captures))
+    return tuple(result)
+
+
 def _xml_name(tag: str) -> tuple[str | None, str]:
     if tag.startswith("{") and "}" in tag:
         namespace, local = tag[1:].split("}", 1)
@@ -341,15 +405,23 @@ def extract(definition: MappingDefinition, captures: dict[str, Any]) -> Any:
     return value
 
 
-def _typed(value: str, kind: str) -> Any:
+def _typed(value: Any, kind: str) -> Any:
     if kind == "integer":
+        if isinstance(value, bool):
+            raise ValueError
         return int(value)
     if kind == "number":
+        if isinstance(value, bool):
+            raise ValueError
         return float(value)
     if kind == "boolean":
+        if isinstance(value, bool):
+            return value
         if value not in {"true", "false"}:
             raise ValueError
         return value == "true"
+    if not isinstance(value, str):
+        raise ValueError
     return value
 
 

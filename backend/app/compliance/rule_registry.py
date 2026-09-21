@@ -7,7 +7,7 @@ from uuid import uuid5
 
 from app.compliance.models import RULE_PACK_NAMESPACE, RuleDefinition, RulePack
 from app.compliance.verdicts import FindingSeverity
-from app.profile_resolution import ARISTA_EOS_4, CISCO_IOS_XE_17, FORTIOS_7, GENERIC_CLI, JUNIPER_JUNOS_18
+from app.profile_resolution import ARISTA_EOS_4, CISCO_IOS_XE_17, FORTIOS_7, GENERIC_CLI, GENERIC_JSON, GENERIC_XML, JUNIPER_JUNOS_18
 
 
 class RuleRegistryError(ValueError):
@@ -137,6 +137,18 @@ GENERIC_RULE_PACK = RulePack(
     rules=tuple(replace(rule, applicability=MappingProxyType({"profile_version_id": GENERIC_CLI.profile_version_id})) for rule in RULES),
 )
 
+GENERIC_XML_RULE_PACK = RulePack(
+    uuid5(RULE_PACK_NAMESPACE, "generic_xml_technical_baseline@1.0.0"),
+    "generic_xml_technical_baseline", "1.0.0", GENERIC_XML.profile_version_id,
+    _rules_for(GENERIC_XML.profile_version_id, RULES),
+)
+
+GENERIC_JSON_RULE_PACK = RulePack(
+    uuid5(RULE_PACK_NAMESPACE, "generic_json_technical_baseline@1.0.0"),
+    "generic_json_technical_baseline", "1.0.0", GENERIC_JSON.profile_version_id,
+    _rules_for(GENERIC_JSON.profile_version_id, RULES),
+)
+
 
 class RuleRegistry:
     def __init__(
@@ -233,13 +245,15 @@ def _validate_framework_references(references: tuple[dict[str, object], ...]) ->
 
 
 RULE_REGISTRY = RuleRegistry(
-    (RULE_PACK_V1, RULE_PACK, FORTIOS_RULE_PACK_V1, FORTIOS_RULE_PACK, JUNOS_RULE_PACK_V1, JUNOS_RULE_PACK, ARISTA_RULE_PACK_V1, ARISTA_RULE_PACK, GENERIC_RULE_PACK_V1, GENERIC_RULE_PACK),
+    (RULE_PACK_V1, RULE_PACK, FORTIOS_RULE_PACK_V1, FORTIOS_RULE_PACK, JUNOS_RULE_PACK_V1, JUNOS_RULE_PACK, ARISTA_RULE_PACK_V1, ARISTA_RULE_PACK, GENERIC_RULE_PACK_V1, GENERIC_RULE_PACK, GENERIC_XML_RULE_PACK, GENERIC_JSON_RULE_PACK),
     active_by_profile={
         CISCO_IOS_XE_17.profile_version_id: RULE_PACK.rule_pack_version_id,
         FORTIOS_7.profile_version_id: FORTIOS_RULE_PACK.rule_pack_version_id,
         JUNIPER_JUNOS_18.profile_version_id: JUNOS_RULE_PACK.rule_pack_version_id,
         ARISTA_EOS_4.profile_version_id: ARISTA_RULE_PACK.rule_pack_version_id,
         GENERIC_CLI.profile_version_id: GENERIC_RULE_PACK.rule_pack_version_id,
+        GENERIC_XML.profile_version_id: GENERIC_XML_RULE_PACK.rule_pack_version_id,
+        GENERIC_JSON.profile_version_id: GENERIC_JSON_RULE_PACK.rule_pack_version_id,
     },
 )
 
@@ -252,5 +266,7 @@ RULE_PACK_BY_PROFILE = MappingProxyType({
         JUNIPER_JUNOS_18.profile_version_id,
         ARISTA_EOS_4.profile_version_id,
         GENERIC_CLI.profile_version_id,
+        GENERIC_XML.profile_version_id,
+        GENERIC_JSON.profile_version_id,
     )
 })

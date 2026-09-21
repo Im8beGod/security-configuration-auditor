@@ -53,6 +53,7 @@ def test_arista_profile_requires_bounded_version_output():
     assert result.selected_profile_version_id == "arista.eos.4@1.0.0"
     assert (result.vendor, result.os, result.os_version) == ("Arista", "EOS", "4.31.2F")
     assert result.device_class == DeviceClass.SWITCH
+    assert (result.model, result.serial_number) == ("vEOS-lab", "TEST0001")
 
     config_claim = _resolve(_document(
         "! Arista EOS version 4.31.2F\nmanagement ssh\n   no shutdown\n",
@@ -126,4 +127,19 @@ def test_arista_remediation_rule_binding_and_parameter_validation():
         preview_remediation(
             db, SimpleNamespace(organization_id=UUID(int=10)), db.finding.finding_id,
             {"destination": "bad value"},
+        )
+    db.finding = SimpleNamespace(
+        finding_id=uuid4(), audit_id=UUID(int=30),
+        rule_id="management.idle_timeout.maximum",
+        remediation_procedure_id=None, verdict="fail",
+    )
+    preview = preview_remediation(
+        db, SimpleNamespace(organization_id=UUID(int=10)), db.finding.finding_id,
+        {"minutes": "10"},
+    )
+    assert "idle-timeout 10" in preview["rendered_steps"]
+    with pytest.raises(RemediationError):
+        preview_remediation(
+            db, SimpleNamespace(organization_id=UUID(int=10)), db.finding.finding_id,
+            {"minutes": "0"},
         )

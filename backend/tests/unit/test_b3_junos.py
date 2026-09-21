@@ -70,12 +70,25 @@ def test_manifest_selectors_resolve_junos_xml_identity_with_path_provenance():
     assert resolved.identity_provenance["hostname"][0]["path"][-1] == "host-name[1]"
 
 
-def test_generic_unknown_xml_does_not_gain_a_profile_from_manifest_selectors():
+def test_generic_unknown_xml_uses_bounded_training_profile_without_vendor_inference():
     text = "<rpc-reply><configuration><system><services><ssh/></services></system></configuration></rpc-reply>"
     document = EvidenceDocument(UUID(int=11), UUID(int=2), UUID(int=3), UUID(int=4), ArtifactEvidenceType.CONFIGURATION, "unknown.xml", "c" * 64, {}, text, len(text), False)
     resolved = resolve_profile(SnapshotEvidence(UUID(int=3), UUID(int=2), UUID(int=4), (document,), (), len(text)))
-    assert resolved.resolution_status is ResolutionStatus.UNRESOLVED
-    assert resolved.selected_profile_version_id is None
+    assert resolved.resolution_status is ResolutionStatus.RESOLVED
+    assert resolved.selected_profile_version_id == "generic.xml@1.0.0"
+    assert resolved.vendor == "Generic"
+
+
+def test_junos_telnet_presence_is_a_bounded_canonical_fact():
+    result = interpret_xml_structural_ir(
+        _ir("<configuration><system><services><telnet/></services></system></configuration>"),
+        InterpretationContext(UUID(int=5), UUID(int=6), UUID(int=3)),
+        profile_version_id="juniper.junos.18@1.0.0",
+        knowledge_pack=JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+    )
+    telnet = next(item for item in result.facts if item.field_id == "management.remote.telnet.enabled")
+    assert telnet.value.value is True
+    assert telnet.evidence_refs[0].evidence_type is ArtifactEvidenceType.STRUCTURED_EXPORT
 
 
 def test_manifest_routes_structured_xml_only_to_declared_reader(tmp_path):

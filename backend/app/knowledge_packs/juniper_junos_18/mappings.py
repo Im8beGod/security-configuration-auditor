@@ -56,3 +56,17 @@ MAPPINGS = B4_MAPPINGS[:2] + (
         ),
     ),
 )
+
+PHASE6_MAPPINGS = MAPPINGS + (
+    DeclarativeMapping(
+        UUID("b3010000-0000-5000-8000-000000000006"),
+        UUID("b3020000-0000-5000-8000-000000000106"),
+        "management.remote.telnet.enabled", NodeMatcher(command="xml"),
+        "training_dsl", "device", frozenset({TypedValueType.BOOLEAN}),
+        training_definition=_definition(
+            "management.remote.telnet.enabled",
+            ["configuration", "system", "services", "telnet"],
+            "presence", "boolean",
+        ),
+    ),
+)

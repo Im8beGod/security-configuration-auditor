@@ -14,6 +14,8 @@ from app.profile_resolution import (
     CISCO_IOS_XE_17,
     FORTIOS_7,
     GENERIC_CLI,
+    GENERIC_JSON,
+    GENERIC_XML,
     JUNIPER_JUNOS_18,
     MAX_ARTIFACT_INSPECTION_BYTES,
     PROFILE_REGISTRY,
@@ -66,6 +68,8 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "juniper.junos.18@1.0.0": JUNIPER_JUNOS_18,
         "arista.eos.4@1.0.0": ARISTA_EOS_4,
         "generic.cli@1.0.0": GENERIC_CLI,
+        "generic.xml@1.0.0": GENERIC_XML,
+        "generic.json@1.0.0": GENERIC_JSON,
     }
     assert CISCO_IOS_XE_17.profile_id == "cisco.ios_xe.17"
     assert CISCO_IOS_XE_17.profile_version == "1.0.0"

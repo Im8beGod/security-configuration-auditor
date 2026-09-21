@@ -10,6 +10,7 @@ from app.parsing.readers.indentation_cli import (
 )
 from app.parsing.readers.fortios_cli import FORTIOS_CLI_READER_ID, FortiosCliReader
 from app.parsing.readers.xml_tree import XML_TREE_READER_ID, XmlTreeReader
+from app.parsing.readers.json_tree import JSON_TREE_READER_ID, JsonTreeReader
 
 
 class StructuralReader(Protocol):
@@ -48,4 +49,5 @@ READER_REGISTRY = StructuralReaderRegistry((
     INDENTATION_CLI_READER,
     FortiosCliReader(),
     XmlTreeReader(),
+    JsonTreeReader(),
 ))

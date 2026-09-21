@@ -93,6 +93,7 @@ class ValidationRequestResponse(BaseModel):
 
 class MappingValidationRequest(BaseModel):
     evidence_artifact_id: UUID | None = None
+    negative_evidence_artifact_id: UUID | None = None
 
 
 class PublicationResponse(BaseModel):

@@ -14,7 +14,7 @@ from app.profile_resolution.models import (
     ResolutionStatus,
     SignalStrength,
 )
-from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, GENERIC_CLI, PROFILE_REGISTRY, ProfileManifest, compatible_manifests
+from app.profile_resolution.registry import CISCO_IOS_XE_17, FORTIOS_7, GENERIC_CLI, GENERIC_JSON, GENERIC_XML, PROFILE_REGISTRY, ProfileManifest, compatible_manifests
 
 
 MAX_LINE_CHARACTERS = 4096
@@ -57,8 +57,9 @@ JUNOS_PATTERN = re.compile(
 )
 FORTIOS_PATTERN = re.compile(rf"\bFortiOS\s+v?{VALUE_PATTERN}", re.IGNORECASE)
 ARISTA_PRODUCT_PATTERN = re.compile(
-    r"^\s*Arista\s+(?:vEOS(?:-lab)?|EOS|DCS-[A-Za-z0-9._/-]+)\b", re.IGNORECASE
+    r"^\s*Arista\s+(vEOS(?:-lab)?|EOS|DCS-[A-Za-z0-9._/-]+)\b", re.IGNORECASE
 )
+ARISTA_SERIAL_PATTERN = re.compile(rf"^\s*Serial number\s*:\s*{VALUE_PATTERN}", re.IGNORECASE)
 ARISTA_SOFTWARE_VERSION_PATTERN = re.compile(
     rf"^\s*Software image version\s*:\s*{VALUE_PATTERN}", re.IGNORECASE
 )
@@ -165,7 +166,8 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
                     _append_signal(signals, signal)
 
             if document.evidence_type == ArtifactEvidenceType.VERSION_OUTPUT:
-                if ARISTA_PRODUCT_PATTERN.search(match_line):
+                arista_product = ARISTA_PRODUCT_PATTERN.search(match_line)
+                if arista_product:
                     document_arista_context = True
                     signal = _signal(
                         document, line_number, "os_identity", "arista_eos_marker",
@@ -173,6 +175,20 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
                     )
                     identities.append(_Identity("Arista", "EOS", None, signal))
                     _append_signal(signals, signal)
+                    model_signal = _signal(
+                        document, line_number, "hardware_identity", "arista_model",
+                        SignalStrength.STRONG, ("model",),
+                    )
+                    models.append(_Hardware(arista_product.group(1), model_signal))
+                    _append_signal(signals, model_signal)
+                arista_serial = ARISTA_SERIAL_PATTERN.search(match_line)
+                if arista_serial and document_arista_context:
+                    serial_signal = _signal(
+                        document, line_number, "hardware_identity", "arista_serial",
+                        SignalStrength.STRONG, ("serial_number",),
+                    )
+                    serials.append(_Hardware(arista_serial.group(1), serial_signal))
+                    _append_signal(signals, serial_signal)
                 arista_version = ARISTA_SOFTWARE_VERSION_PATTERN.search(match_line)
                 if arista_version:
                     arista_versions.append((arista_version.group(1), line_number))
@@ -383,8 +399,8 @@ def _resolve_candidates(
             )
 
         version = next(iter(versions), None)
-        model = _first_value(models) if vendor == "Cisco" else None
-        serial_number = _first_value(serials) if vendor == "Cisco" else None
+        model = _first_value(models)
+        serial_number = _first_value(serials)
         product_family, device_class = _classify_hardware(model)
         explicit_confidence = (
             ResolutionConfidence.HIGH
@@ -462,6 +478,7 @@ def _resolve_candidates(
             if version is None:
                 return _result(
                     vendor=vendor, product_family="EOS", os_name=os_name,
+                    model=model, serial_number=serial_number,
                     device_class=DeviceClass.SWITCH, signals=signals,
                     confidence=ResolutionConfidence.MEDIUM,
                     status=ResolutionStatus.PARTIALLY_RESOLVED,
@@ -472,6 +489,7 @@ def _resolve_candidates(
                 return _result(
                     vendor=vendor, product_family="EOS", os_name=os_name,
                     os_version=version, device_class=DeviceClass.SWITCH,
+                    model=model, serial_number=serial_number,
                     signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
                     status=ResolutionStatus.AMBIGUOUS,
                     reasons=("Multiple compatible profile manifests were detected",),
@@ -481,6 +499,7 @@ def _resolve_candidates(
                 return _result(
                     vendor=vendor, product_family="EOS", os_name=os_name,
                     os_version=version, device_class=DeviceClass.SWITCH,
+                    model=model, serial_number=serial_number,
                     selected_profile_id=selected.profile_id,
                     selected_profile_version_id=selected.profile_version_id,
                     signals=signals, confidence=explicit_confidence,
@@ -489,6 +508,7 @@ def _resolve_candidates(
             return _result(
                 vendor=vendor, product_family="EOS", os_name=os_name,
                 os_version=version, device_class=DeviceClass.SWITCH,
+                model=model, serial_number=serial_number,
                 signals=signals, confidence=explicit_confidence,
                 status=ResolutionStatus.UNSUPPORTED,
                 reasons=("Detected EOS version is outside the supported 4.x profile",),
@@ -543,24 +563,37 @@ def _resolve_candidates(
         document for document in documents
         if document.text.strip() and document.evidence_type in {
             ArtifactEvidenceType.CONFIGURATION,
+            ArtifactEvidenceType.STRUCTURED_EXPORT,
             ArtifactEvidenceType.UNKNOWN_EVIDENCE,
         }
     )
+    structured_profiles = (
+        (GENERIC_XML, lambda text: text.lstrip().startswith("<")),
+        (GENERIC_JSON, lambda text: text.lstrip().startswith(("{", "["))),
+    )
+    for generic_profile, predicate in structured_profiles:
+        if configuration_documents and all(predicate(document.text) for document in configuration_documents) and not signals:
+            labels = _administrator_labels(configuration_documents)
+            return _result(
+                vendor=generic_profile.vendor,
+                product_family=generic_profile.product_family,
+                os_name=generic_profile.os,
+                device_class=DeviceClass.UNKNOWN,
+                selected_profile_id=generic_profile.profile_id,
+                selected_profile_version_id=generic_profile.profile_version_id,
+                signals=signals,
+                confidence=ResolutionConfidence.LOW,
+                status=ResolutionStatus.RESOLVED,
+                reasons=("Generic bounded structured profile selected without inferred semantics",),
+                metadata={"administrator_labels": labels} if labels else {},
+            )
     generic_documents = tuple(
         document for document in configuration_documents
         if not document.text.lstrip().startswith("<")
         and not KNOWN_PLATFORM_CLAIM_PATTERN.search(document.text[:MAX_LINE_CHARACTERS])
     )
     if generic_documents and len(generic_documents) == len(configuration_documents) and not signals:
-        labels: dict[str, str] = {}
-        for key in ("vendor_label", "os_label"):
-            values = {
-                str(document.source_metadata[key]).strip()
-                for document in generic_documents
-                if document.source_metadata.get(key)
-            }
-            if len(values) == 1:
-                labels[key.removesuffix("_label")] = next(iter(values))
+        labels = _administrator_labels(generic_documents)
         return _result(
             vendor=GENERIC_CLI.vendor,
             product_family=GENERIC_CLI.product_family,
@@ -582,6 +615,19 @@ def _resolve_candidates(
         signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
         status=ResolutionStatus.UNRESOLVED, reasons=tuple(reasons),
     )
+
+
+def _administrator_labels(documents: tuple[EvidenceDocument, ...]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for key in ("vendor_label", "os_label"):
+        values = {
+            str(document.source_metadata[key]).strip()
+            for document in documents
+            if document.source_metadata.get(key)
+        }
+        if len(values) == 1:
+            labels[key.removesuffix("_label")] = next(iter(values))
+    return labels
 
 
 def _result(

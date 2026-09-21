@@ -255,7 +255,7 @@ JUNIPER_JUNOS_18 = ProfileManifest(
     device_classes=frozenset({DeviceClass.ROUTER, DeviceClass.SWITCH, DeviceClass.FIREWALL}),
     accepted_evidence_types=frozenset(ArtifactEvidenceType),
     structural_reader_name="xml_tree.v1",
-    knowledge_pack_name="juniper_junos_18@1.1.0",
+    knowledge_pack_name="juniper_junos_18@1.2.0",
     capabilities=frozenset({"profile_detection", "structural_parsing", "semantic_interpretation", "effective_state_resolution", "deterministic_compliance"}),
     coverage_manifest=MappingProxyType({
         "supported_version_family": "Junos 18.4 XML configuration",
@@ -342,6 +342,63 @@ GENERIC_CLI = ProfileManifest(
     }),
 )
 
+GENERIC_XML = ProfileManifest(
+    profile_id="generic.xml",
+    profile_version_id="generic.xml@1.0.0",
+    profile_version="1.0.0",
+    vendor="Generic",
+    product_family="Generic XML",
+    os="XML",
+    version_constraint=VersionConstraint(frozenset({1})),
+    device_classes=frozenset({DeviceClass.UNKNOWN, DeviceClass.OTHER}),
+    accepted_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
+    structural_reader_name="xml_tree.v1",
+    knowledge_pack_name="generic_xml@1.0.0",
+    capabilities=frozenset({
+        "structural_parsing", "semantic_interpretation",
+        "effective_state_resolution", "deterministic_compliance",
+        "administrator_training",
+    }),
+    coverage_manifest=MappingProxyType({
+        "structural_reader": "xml_tree.v1",
+        "canonical_fields": (),
+        "limitations": (
+            "Only exact bounded element paths, namespaces, text, attributes, and presence are supported",
+            "No XPath, schema inference, defaults, references, or arbitrary expressions are supported",
+            "Unsupported or unmatched leaves remain UNKNOWN",
+        ),
+    }),
+    structural_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
+)
+
+GENERIC_JSON = ProfileManifest(
+    profile_id="generic.json",
+    profile_version_id="generic.json@1.0.0",
+    profile_version="1.0.0",
+    vendor="Generic",
+    product_family="Generic JSON",
+    os="JSON",
+    version_constraint=VersionConstraint(frozenset({1})),
+    device_classes=frozenset({DeviceClass.UNKNOWN, DeviceClass.OTHER}),
+    accepted_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
+    structural_reader_name="json_tree.v1",
+    knowledge_pack_name="generic_json@1.0.0",
+    capabilities=GENERIC_XML.capabilities,
+    coverage_manifest=MappingProxyType({
+        "structural_reader": "json_tree.v1",
+        "canonical_fields": (),
+        "limitations": (
+            "Only exact bounded object-key and array-index paths are supported",
+            "No JSONPath filters, schema inference, defaults, references, or arbitrary expressions are supported",
+            "Unsupported or unmatched leaves remain UNKNOWN",
+        ),
+    }),
+    structural_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
+)
+
 PROFILE_REGISTRY = ProfileManifestRegistry(
-    (CISCO_IOS_XE_17, FORTIOS_7, JUNIPER_JUNOS_18, ARISTA_EOS_4, GENERIC_CLI)
+    (
+        CISCO_IOS_XE_17, FORTIOS_7, JUNIPER_JUNOS_18, ARISTA_EOS_4,
+        GENERIC_CLI, GENERIC_XML, GENERIC_JSON,
+    )
 )

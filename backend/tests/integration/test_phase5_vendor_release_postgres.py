@@ -48,6 +48,13 @@ CASES = (
         "junos.xml", "application/xml", "management.idle_timeout.maximum",
         {"minutes": "10"}, "set system login idle-timeout 10",
     ),
+    (
+        "arista.eos.4@1.0.0",
+        b"Arista vEOS-lab\nSerial number: TEST0001\nSoftware image version: 4.31.2F\n",
+        b"management ssh\n   no shutdown\n   idle-timeout 10\nmanagement telnet\n   no shutdown\nlogging host 192.0.2.40\nntp server time.example.invalid\n",
+        "arista.cfg", "text/plain", "management.telnet.disabled",
+        {}, "shutdown",
+    ),
 )
 
 
@@ -81,7 +88,7 @@ def test_vendor_upload_audit_remediation_and_pdf(
             finalize_snapshot(db, user, snapshot.snapshot_id)
             audit = create_audit(db, user, AuditCreate(
                 snapshot_id=snapshot.snapshot_id,
-                selected_frameworks=["disa"] if profile.startswith("cisco.") else [],
+                selected_frameworks=["disa", "nist"] if profile.startswith("cisco.") else ["nist"],
             ))
             audit, _ = start_audit(db, user, audit.audit_id)
             audit_id = audit.audit_id

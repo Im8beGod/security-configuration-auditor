@@ -14,7 +14,7 @@ from app.knowledge_packs.fortios_7 import (
     FORTIOS_7_KNOWLEDGE_PACK, FORTIOS_7_KNOWLEDGE_PACK_V1_1,
     FORTIOS_7_KNOWLEDGE_PACK_V1_2,
 )
-from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK, JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1
+from app.knowledge_packs.juniper_junos_18 import JUNIPER_JUNOS_18_KNOWLEDGE_PACK, JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1, JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1
 from app.security_model import FIELD_REGISTRY
 
 from app.effective_state.exceptions import EffectiveStateValidationError
@@ -178,6 +178,7 @@ _SEALED_PACK_MAPPING_POLICIES = _declared_mapping_policies(
     FORTIOS_7_KNOWLEDGE_PACK_V1_2,
     FORTIOS_7_KNOWLEDGE_PACK,
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
+    JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1,
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
     ARISTA_EOS_4_KNOWLEDGE_PACK,
 )

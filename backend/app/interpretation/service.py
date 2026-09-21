@@ -66,11 +66,13 @@ from app.knowledge_packs.fortios_7 import (
 from app.knowledge_packs.juniper_junos_18 import (
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
+    JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1,
 )
 from app.knowledge_packs.arista_eos_4 import ARISTA_EOS_4_KNOWLEDGE_PACK
-from app.knowledge_packs.generic_cli import GENERIC_CLI_KNOWLEDGE_PACK
+from app.knowledge_packs.generic_cli import GENERIC_CLI_KNOWLEDGE_PACK, GENERIC_JSON_KNOWLEDGE_PACK, GENERIC_XML_KNOWLEDGE_PACK
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
 from app.parsing.readers.xml_tree import XmlStructuralIR, XmlNode
+from app.parsing.readers.json_tree import JsonStructuralIR, JsonNode
 from app.parsing.exceptions import (
     ArtifactNotParseableError,
     ParsingInfrastructureError,
@@ -87,7 +89,7 @@ from app.security_model import (
     get_field,
     validate_field_value_scope,
 )
-from app.training.dsl import MappingDefinition, ValidationNode, extract as extract_training, matches as matches_training, matches_xml, xml_match_has_unsupported_qualifier
+from app.training.dsl import MappingDefinition, ValidationNode, extract as extract_training, matches as matches_training, matches_json, matches_xml, xml_match_has_unsupported_qualifier
 
 
 KNOWLEDGE_PACK_REGISTRY = KnowledgePackRegistry(
@@ -100,9 +102,12 @@ KNOWLEDGE_PACK_REGISTRY = KnowledgePackRegistry(
         FORTIOS_7_KNOWLEDGE_PACK_V1_2,
         FORTIOS_7_KNOWLEDGE_PACK,
         JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
+        JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1,
         JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
         ARISTA_EOS_4_KNOWLEDGE_PACK,
         GENERIC_CLI_KNOWLEDGE_PACK,
+        GENERIC_XML_KNOWLEDGE_PACK,
+        GENERIC_JSON_KNOWLEDGE_PACK,
     ),
     active_by_profile={
         CISCO_IOS_XE_17_KNOWLEDGE_PACK.profile_version_id:
@@ -115,6 +120,10 @@ KNOWLEDGE_PACK_REGISTRY = KnowledgePackRegistry(
             ARISTA_EOS_4_KNOWLEDGE_PACK.knowledge_pack_version_id,
         GENERIC_CLI_KNOWLEDGE_PACK.profile_version_id:
             GENERIC_CLI_KNOWLEDGE_PACK.knowledge_pack_version_id,
+        GENERIC_XML_KNOWLEDGE_PACK.profile_version_id:
+            GENERIC_XML_KNOWLEDGE_PACK.knowledge_pack_version_id,
+        GENERIC_JSON_KNOWLEDGE_PACK.profile_version_id:
+            GENERIC_JSON_KNOWLEDGE_PACK.knowledge_pack_version_id,
     },
 )
 
@@ -447,11 +456,75 @@ def interpret_xml_structural_ir(
                 continue
             facts.append(_build_xml_fact(context=context, ir=ir, pack=pack, mapping=mapping, value=typed, scope=scope, node=node))
             matched.add(node.node_id)
-    statements = len(ir.nodes)
+    parent_ids = {node.parent_id for node in ir.nodes if node.parent_id is not None}
+    leaves = tuple(node for node in ir.nodes if node.node_id not in parent_ids)
+    statements = len(leaves)
     return InterpretationResult(
         facts=tuple(facts), diagnostics=tuple(diagnostics),
         metrics=InterpretationMetrics(statements, len(matched), len(facts), len(facts), statements - len(matched), len(diagnostics)),
-        unresolved_node_ids=tuple(node.node_id for node in ir.nodes if node.node_id not in matched),
+        unresolved_node_ids=tuple(node.node_id for node in leaves if node.node_id not in matched),
+    )
+
+
+def interpret_json_structural_ir(
+    ir: JsonStructuralIR,
+    context: InterpretationContext,
+    *,
+    profile_version_id: str,
+    knowledge_pack: KnowledgePack | None = None,
+) -> InterpretationResult:
+    """Interpret exact bounded JSON paths using administrator-published mappings."""
+    profile = PROFILE_REGISTRY.get(profile_version_id)
+    if profile is None or ir.reader_id != profile.structural_reader_name:
+        raise InterpretationValidationError("profile_ir_incompatible", "Resolved profile is incompatible with JSON IR")
+    if ir.source.snapshot_id != context.snapshot_id or any(node.source.artifact_id != ir.source.artifact_id for node in ir.nodes):
+        raise InterpretationValidationError("ir_provenance_invalid", "JSON IR provenance is inconsistent")
+    pack = knowledge_pack or load_validated_knowledge_pack(profile_version_id)
+    validate_knowledge_pack(pack, expected_profile_id=profile.profile_id, expected_profile_version_id=profile.profile_version_id, allowed_extractors=frozenset(EXTRACTORS), scope_resolver_types=SCOPE_RESOLVER_TYPES)
+    facts: list[SecurityFactDraft] = []
+    diagnostics: list[InterpretationDiagnostic] = []
+    matched: set[str] = set()
+    for mapping in pack.mappings:
+        definition_payload = mapping.training_definition
+        if not definition_payload or definition_payload.get("structural_match", {}).get("operation") != "json_path":
+            continue
+        definition = MappingDefinition.model_validate(definition_payload)
+        for node, captures in matches_json(definition, ir):
+            try:
+                value = extract_training(definition, captures)
+                value_type = TypedValueType(definition.value_extraction.output_type)
+                typed = TypedValue(value_type, value, unit="seconds" if value_type is TypedValueType.DURATION else None)
+                scope = ScopeRef(type=definition.scope_resolution.strategy, key="device", attributes={})
+                validate_field_value_scope(definition.target_field_id, typed, scope)
+            except (KeyError, TypeError, ValueError, FieldRegistryValidationError):
+                diagnostics.append(InterpretationDiagnostic("json_mapping_output_invalid", node.node_id, mapping.mapping_id))
+                continue
+            facts.append(_build_json_fact(context=context, ir=ir, pack=pack, mapping=mapping, value=typed, scope=scope, node=node))
+            matched.add(node.node_id)
+    leaves = tuple(node for node in ir.nodes if not isinstance(node.value, (dict, list)))
+    return InterpretationResult(
+        facts=tuple(facts), diagnostics=tuple(diagnostics),
+        metrics=InterpretationMetrics(len(leaves), len(matched), len(facts), len(facts), len(leaves) - len(matched), len(diagnostics)),
+        unresolved_node_ids=tuple(node.node_id for node in leaves if node.node_id not in matched),
+    )
+
+
+def _build_json_fact(*, context: InterpretationContext, ir: JsonStructuralIR, pack: KnowledgePack, mapping: DeclarativeMapping, value: TypedValue, scope: ScopeRef, node: JsonNode) -> SecurityFactDraft:
+    evidence = EvidenceRef(
+        artifact_id=node.source.artifact_id, start_line=node.order, end_line=node.order,
+        source_path=node.source.source_label, ir_node_id=node.node_id,
+        evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT,
+    )
+    identity = json.dumps({"audit_id": str(context.audit_id), "mapping_version_id": str(mapping.mapping_version_id), "source_ir_node_ids": (node.node_id,), "field_id": mapping.field_id, "scope": scope.to_dict(), "entity": None, "value": value.to_dict()}, sort_keys=True, separators=(",", ":"))
+    return SecurityFactDraft(
+        fact_id=uuid5(pack.knowledge_pack_version_id, identity), audit_id=context.audit_id,
+        device_id=context.device_id, snapshot_id=context.snapshot_id, field_id=mapping.field_id,
+        value=value, entity=None, scope=scope, state=FactState.EXPLICIT,
+        evidence_refs=(evidence,), source_ir_node_ids=(node.node_id,),
+        extraction_method=InterpretationMethod.DECLARATIVE_MAPPING, mapping_id=mapping.mapping_id,
+        mapping_version_id=mapping.mapping_version_id, knowledge_pack_version_id=pack.knowledge_pack_version_id,
+        validation_status=FactValidationStatus.VALIDATED, dependencies=(),
+        interpretation_confidence=InterpretationConfidence.HIGH,
     )
 
 
@@ -459,7 +532,7 @@ def _build_xml_fact(*, context: InterpretationContext, ir: XmlStructuralIR, pack
     evidence = EvidenceRef(
         artifact_id=node.source.artifact_id, start_line=node.order, end_line=node.order,
         source_path=node.source.source_label, ir_node_id=node.node_id,
-        evidence_type=ArtifactEvidenceType.CONFIGURATION,
+        evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT,
     )
     identity = json.dumps({"audit_id": str(context.audit_id), "mapping_version_id": str(mapping.mapping_version_id), "source_ir_node_ids": (node.node_id,), "field_id": mapping.field_id, "scope": scope.to_dict(), "entity": None, "value": value.to_dict()}, sort_keys=True, separators=(",", ":"))
     return SecurityFactDraft(
@@ -594,7 +667,7 @@ def interpret_audit(
         db.expunge(artifact)
     db.rollback()
 
-    parsed_irs: list[StructuralIR | XmlStructuralIR] = []
+    parsed_irs: list[StructuralIR | XmlStructuralIR | JsonStructuralIR] = []
     artifact_diagnostics: list[ArtifactInterpretationDiagnostic] = [
         ArtifactInterpretationDiagnostic(
             artifact.artifact_id, "unsupported_configuration_evidence"
@@ -627,6 +700,8 @@ def interpret_audit(
     for ir in parsed_irs:
         if isinstance(ir, XmlStructuralIR):
             result = interpret_xml_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
+        elif isinstance(ir, JsonStructuralIR):
+            result = interpret_json_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
         else:
             result = interpret_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
         artifact_results.append(result)
@@ -979,7 +1054,7 @@ def _persist_unresolved_blocks(
     context: InterpretationContext,
     profile_id: str,
     profile_version_id: str,
-    parsed_irs: list[StructuralIR | XmlStructuralIR],
+    parsed_irs: list[StructuralIR | XmlStructuralIR | JsonStructuralIR],
     results: list[InterpretationResult],
     knowledge_pack: KnowledgePack,
     unsupported_artifacts: list[tuple[Artifact, str]],
@@ -1026,6 +1101,9 @@ def _persist_unresolved_blocks(
                 rule.rule_id for rule in rules
                 if set(rule.required_effective_states) & set(candidate_field_ids)
             })
+            if profile_id in {"generic.cli", "generic.xml", "generic.json"}:
+                candidate_field_ids = all_field_ids
+                affected_rule_ids = all_rule_ids
             if (
                 isinstance(ir, StructuralIR)
                 and node.kind is ConfigNodeKind.OPAQUE
@@ -1036,15 +1114,22 @@ def _persist_unresolved_blocks(
             nearby = sorted(ir.nodes, key=lambda item: item.order)
             position = next(index for index, item in enumerate(nearby) if item.node_id == node.node_id)
             context_text = "\n".join(
-                (item.raw_text if isinstance(ir, StructuralIR) else f"<{item.tag}>{item.text or ''}")
+                (
+                    item.raw_text if isinstance(ir, StructuralIR)
+                    else f"<{item.tag}>{item.text or ''}" if isinstance(ir, XmlStructuralIR)
+                    else f"{list(item.path)} = {item.value!r}"
+                )
                 for item in nearby[max(0, position - 2):position + 3]
             )[:4096]
             if isinstance(ir, StructuralIR):
                 raw_text = node.raw_text
                 occurrence = {"artifact_id": str(node.artifact_id), "command": node.command, "arguments": list(node.arguments), "parent_command": parent.command if parent else None, "ancestor_commands": list(node.context_path), "negated": node.negated, "order": node.order}
-            else:
+            elif isinstance(ir, XmlStructuralIR):
                 raw_text = f"<{node.tag}>{node.text or ''}"[:2048]
                 occurrence = {"artifact_id": str(artifact_id), "xml_path": list(node.path), "tag": node.tag, "attributes": dict(node.attributes), "text": node.text, "order": node.order}
+            else:
+                raw_text = f"{list(node.path)} = {node.value!r}"[:2048]
+                occurrence = {"artifact_id": str(artifact_id), "json_path": list(node.path), "value": node.value, "order": node.order}
             db.add(UnresolvedBlock(
                 organization_id=organization_id,
                 audit_id=context.audit_id,
@@ -1059,7 +1144,11 @@ def _persist_unresolved_blocks(
                     "end_line": end_line,
                     "source_path": source_label,
                     "ir_node_id": node.node_id,
-                    "evidence_type": ArtifactEvidenceType.CONFIGURATION.value,
+                    "evidence_type": (
+                        ArtifactEvidenceType.CONFIGURATION.value
+                        if isinstance(ir, StructuralIR)
+                        else ArtifactEvidenceType.STRUCTURED_EXPORT.value
+                    ),
                 }],
                 raw_text=raw_text,
                 surrounding_context=context_text,

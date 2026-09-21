@@ -69,6 +69,18 @@ def _definition() -> MappingDefinition:
     })
 
 
+def _json_definition() -> MappingDefinition:
+    return MappingDefinition.model_validate({
+        "profile_applicability": {"profile_version_ids": ["generic.json@1.0.0"]},
+        "structural_match": {"operation": "json_path", "command": "json", "json_path": {"path": [{"key": "management"}, {"key": "ssh"}, {"key": "enabled"}], "source": "value", "capture": "enabled", "value_type": "boolean"}},
+        "target_field_id": "management.remote.ssh.enabled",
+        "value_extraction": {"operation": "capture", "capture": "enabled", "output_type": "boolean"},
+        "scope_resolution": {"strategy": "device"},
+        "negation_behavior": {"operation": "unsupported"}, "removal_behavior": {"operation": "unsupported"},
+        "default_behavior": {"operation": "unknown"}, "examples": [],
+    })
+
+
 def test_unknown_upload_publish_and_reevaluate_without_redeployment(tmp_path, monkeypatch):
     engine = create_database_engine(get_settings())
     connection = engine.connect()
@@ -214,6 +226,74 @@ def test_unknown_upload_publish_and_reevaluate_without_redeployment(tmp_path, mo
             assert ssh.evidence_refs[0]["artifact_id"] == str(artifact_id)
             assert db.scalar(select(SecurityFact).where(SecurityFact.audit_id == revision_id)).mapping_version_id == mapping_version_id
             assert db.scalar(select(UnresolvedBlock).where(UnresolvedBlock.audit_id == revision_id)) is None
+    finally:
+        outer.rollback()
+        connection.close()
+        engine.dispose()
+
+
+def test_json_mapping_persists_across_reconstructed_worker(tmp_path, monkeypatch):
+    engine = create_database_engine(get_settings())
+    connection = engine.connect()
+    outer = connection.begin()
+    factory = sessionmaker(bind=connection, join_transaction_mode="create_savepoint", autoflush=False, expire_on_commit=False)
+    storage = LocalFilesystemArtifactStorage(tmp_path / "artifacts")
+    monkeypatch.setattr("app.ingestion.storage.get_artifact_storage", lambda: storage)
+    suffix = uuid4().hex
+    content, negative_content = b'{"management":{"ssh":{"enabled":false}}}', b'{"management":{"ssh":{"port":22}}}'
+    try:
+        organization_id, user_id = bootstrap_admin(factory, "JSON", f"json-{suffix}", f"json-{suffix}@example.invalid", "test-only-password")
+        with factory.begin() as db:
+            device = Device(organization_id=organization_id, display_name="Unknown JSON")
+            db.add(device); db.flush()
+
+            def artifact_for(body: bytes, name: str):
+                artifact_id = uuid4()
+                snapshot = Snapshot(organization_id=organization_id, device_id=device.device_id, grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED, snapshot_hash=calculate_snapshot_hash([sha256(body).hexdigest()]), artifact_count=1, source=SnapshotSource.UPLOAD, status=SnapshotStatus.LOCKED, created_by=user_id)
+                db.add(snapshot); db.flush()
+                artifact = Artifact(artifact_id=artifact_id, organization_id=organization_id, snapshot_id=snapshot.snapshot_id, original_filename=name, storage_reference=storage.write(body, organization_id=organization_id, artifact_id=artifact_id), byte_size=len(body), sha256=sha256(body).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.JSON, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY, uploaded_by=user_id, source_metadata={"vendor_label": "Nebula", "os_label": "API OS"})
+                db.add(artifact)
+                return artifact, snapshot
+
+            artifact, snapshot = artifact_for(content, "unknown.json")
+            negative, _ = artifact_for(negative_content, "negative.json")
+            audit = Audit(organization_id=organization_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, revision_number=1, reevaluation_reason=AuditReevaluationReason.INITIAL, status=AuditStatus.QUEUED, selected_frameworks=[], version_refs={}, profile_resolution={}, verdict_counts={}, severity_counts={}, coverage={}, created_by=user_id)
+            db.add(audit); db.flush()
+            audit_id, device_id, artifact_id, negative_id = audit.audit_id, device.device_id, artifact.artifact_id, negative.artifact_id
+
+        AuditPipelineCoordinator(factory, storage).run(audit_id, organization_id)
+        with factory() as db:
+            initial = db.get(Audit, audit_id)
+            assert initial.profile_resolution["profile_version_id"] == "generic.json@1.0.0"
+            assert {item.verdict for item in db.scalars(select(Finding).where(Finding.audit_id == audit_id))} == {FindingVerdict.UNKNOWN}
+            block = db.scalar(select(UnresolvedBlock).where(UnresolvedBlock.audit_id == audit_id))
+            assert block and block.evidence_refs[0]["artifact_id"] == str(artifact_id)
+            admin = db.get(User, user_id)
+            mapping = create_mapping(db, admin, mapping_key="generic.json.ssh", title="JSON SSH", description="Exact JSON path", definition=_json_definition(), unresolved_block_id=block.unresolved_block_id)
+            run, _ = request_validation(db, admin, mapping.mapping_version_id, evidence_artifact_id=artifact_id, negative_evidence_artifact_id=negative_id)
+            mapping_id, run_id = mapping.mapping_version_id, run.validation_run_id
+        with factory.begin() as db:
+            assert execute_validation(db, run_id, mapping_id, organization_id).results["passed"] is True
+        with factory() as db:
+            admin = db.get(User, user_id)
+            approve_mapping(db, admin, mapping_id)
+            _mapping, pack = publish_mapping(db, admin, mapping_id)
+            pack_id = pack.knowledge_pack_version_id
+        with factory.begin() as db:
+            future_artifact_id = uuid4()
+            future_snapshot = Snapshot(organization_id=organization_id, device_id=device_id, grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED, snapshot_hash=calculate_snapshot_hash([sha256(content).hexdigest()]), artifact_count=1, source=SnapshotSource.UPLOAD, status=SnapshotStatus.LOCKED, created_by=user_id)
+            db.add(future_snapshot); db.flush()
+            db.add(Artifact(artifact_id=future_artifact_id, organization_id=organization_id, snapshot_id=future_snapshot.snapshot_id, original_filename="future.json", storage_reference=storage.write(content, organization_id=organization_id, artifact_id=future_artifact_id), byte_size=len(content), sha256=sha256(content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.JSON, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY, uploaded_by=user_id))
+            future = Audit(organization_id=organization_id, device_id=device_id, snapshot_id=future_snapshot.snapshot_id, revision_number=2, reevaluation_reason=AuditReevaluationReason.INITIAL, status=AuditStatus.QUEUED, selected_frameworks=[], version_refs={}, profile_resolution={}, verdict_counts={}, severity_counts={}, coverage={}, created_by=user_id)
+            db.add(future); db.flush()
+            future_id = future.audit_id
+        restarted_factory = sessionmaker(bind=connection, join_transaction_mode="create_savepoint", autoflush=False, expire_on_commit=False)
+        AuditPipelineCoordinator(restarted_factory, storage).run(future_id, organization_id)
+        with restarted_factory() as db:
+            future = db.get(Audit, future_id)
+            ssh = db.scalar(select(Finding).where(Finding.audit_id == future_id, Finding.rule_id == "management.ssh.enabled"))
+            assert future.version_refs["knowledge_pack_version_id"] == str(pack_id)
+            assert ssh.verdict is FindingVerdict.FAIL and ssh.evidence_refs[0]["artifact_id"] == str(future_artifact_id)
     finally:
         outer.rollback()
         connection.close()

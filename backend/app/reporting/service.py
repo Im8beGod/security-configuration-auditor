@@ -6,7 +6,7 @@ from app.db.models import AssessmentObligation, AssessmentResult, Audit, AuditAs
 from app.db.models.common import utc_now
 from app.jobs.enums import JobType
 from app.jobs.service import enqueue_job
-from app.remediation.service import get_remediation
+from app.remediation.service import get_remediation, get_rule_remediation
 from app.reporting import repository
 from app.reporting.pdf import build_device_compliance_pdf
 from app.reporting.storage import ReportStorage
@@ -116,6 +116,14 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
                 "implementation_status": result.implementation_status,
                 "verdict": result.verdict,
                 "details": result.result_details,
+                "technical_finding_id": str(result.technical_finding_id) if result.technical_finding_id else None,
+                "evaluator_rule_id": obligation.evaluator_rule_id,
+                "remediation": get_rule_remediation(
+                    db, user, audit, obligation.evaluator_rule_id, result.verdict,
+                    result.assessment_result_id,
+                ) if user and obligation.evaluator_rule_id and result.verdict else {
+                    "status": "unavailable", "reason": "no_automatic_evaluator",
+                },
             } for result, obligation in rows]
     pdf = build_device_compliance_pdf(build_report_document(device, audit, records, assessment, assessment_results))
     reference = storage.write(pdf, organization_id=report.organization_id, report_id=report.report_id)

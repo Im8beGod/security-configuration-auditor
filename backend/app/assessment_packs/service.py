@@ -23,6 +23,7 @@ from app.db.models import (
     AssessmentPackVersion as AssessmentPackVersionRow,
     AssessmentResult as AssessmentResultRow,
     Audit, AuditAssessment, AuditFrameworkAssessment, EffectiveState, Finding,
+    SecurityFact,
 )
 from app.effective_state.contracts import ResolutionStatus, UnresolvedReason
 
@@ -241,6 +242,22 @@ def persist_assessment_results(
     states = list(db.scalars(select(EffectiveState).where(
         EffectiveState.audit_id == audit_id,
     ).order_by(EffectiveState.field_id, EffectiveState.scope_key)))
+    fact_ids = {
+        UUID(str(fact_id)) for state in states for fact_id in state.source_fact_ids
+    }
+    facts = list(db.scalars(select(SecurityFact).where(
+        SecurityFact.audit_id == audit_id,
+        SecurityFact.fact_id.in_(fact_ids),
+    ))) if fact_ids else []
+    evidence_by_fact = {str(fact.fact_id): fact.evidence_refs for fact in facts}
+
+    def state_evidence(state: EffectiveState) -> list[dict[str, Any]]:
+        unique: dict[str, dict[str, Any]] = {}
+        for fact_id in state.source_fact_ids:
+            for reference in evidence_by_fact.get(str(fact_id), []):
+                if isinstance(reference, dict):
+                    unique[repr(sorted(reference.items()))] = reference
+        return list(unique.values())
     findings_by_rule: dict[str, list[Finding]] = {}
     for finding in findings:
         findings_by_rule.setdefault(finding.rule_id, []).append(finding)
@@ -275,9 +292,9 @@ def persist_assessment_results(
                 (item for item in rule_findings if item.verdict == FindingVerdict.UNKNOWN),
                 rule_findings[0] if rule_findings else None,
             )
-            finding_id = finding.finding_id if finding else None
             if finding is not None and finding.verdict == FindingVerdict.UNKNOWN:
                 verdict = FindingVerdict.UNKNOWN.value
+                details["evidence_refs"] = list(finding.evidence_refs)
                 reason = finding.unknown_reason or UnresolvedReason.UNKNOWN_SEMANTICS
                 details["unknown_reason"] = (
                     reason.value if isinstance(reason, UnresolvedReason) else str(reason)
@@ -300,6 +317,7 @@ def persist_assessment_results(
                     "source_fact_ids": [str(item) for item in state.source_fact_ids],
                     "resolution_trace": state.resolution_trace,
                 }
+                details["evidence_refs"] = state_evidence(state)
                 if state.resolution_status is not ResolutionStatus.RESOLVED:
                     verdict = FindingVerdict.UNKNOWN.value
                     reason = state.unresolved_reason or UnresolvedReason.CONFLICTING_EVIDENCE
@@ -314,6 +332,13 @@ def persist_assessment_results(
                     except EvaluationError:
                         verdict = FindingVerdict.UNKNOWN.value
                         details["unknown_reason"] = "assessment_evaluation_error"
+            if finding is not None:
+                details["baseline_finding"] = {
+                    "finding_id": str(finding.finding_id),
+                    "verdict": finding.verdict.value,
+                }
+                if finding.verdict.value == verdict:
+                    finding_id = finding.finding_id
         elif applicability is ApplicabilityStatus.APPLICABLE and obligation.implementation_status == ImplementationStatus.MANUAL.value:
             details["state"] = "manual"
         elif applicability is ApplicabilityStatus.APPLICABLE and obligation.implementation_status == ImplementationStatus.UNIMPLEMENTED.value:

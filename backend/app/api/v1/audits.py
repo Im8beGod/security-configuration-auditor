@@ -27,6 +27,10 @@ from app.reevaluation.service import eligibility as reevaluation_eligibility, hi
 from app.auth.dependencies import get_current_user, require_roles
 from app.db.models import Audit, User, UserRole
 from app.db.session import get_db
+from app.remediation.schemas import RemediationPreviewRequest
+from app.remediation.service import (
+    RemediationError, get_rule_remediation, preview_rule_remediation,
+)
 
 
 router = APIRouter(prefix="/audits", tags=["audits"])
@@ -198,7 +202,47 @@ def assessment_results_endpoint(
         "assessment_method": result.assessment_method,
         "implementation_status": result.implementation_status,
         "verdict": result.verdict, "details": result.result_details,
+        "technical_finding_id": str(result.technical_finding_id) if result.technical_finding_id else None,
+        "evaluator_rule_id": obligation.evaluator_rule_id,
+        "remediation": get_rule_remediation(
+            db, user, audit, obligation.evaluator_rule_id, result.verdict,
+            result.assessment_result_id,
+        ) if obligation.evaluator_rule_id and result.verdict else {
+            "status": "unavailable", "reason": "no_automatic_evaluator",
+            "assessment_result_id": str(result.assessment_result_id),
+        },
     } for result, obligation in rows]
+
+
+@router.post("/{audit_id}/assessment-results/{assessment_result_id}/remediation/preview")
+def assessment_remediation_preview_endpoint(
+    audit_id: UUID,
+    assessment_result_id: UUID,
+    request: RemediationPreviewRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    audit = get_audit(db, user, audit_id)
+    row = db.execute(select(AssessmentResult, AssessmentObligation).join(
+        AssessmentObligation,
+        AssessmentResult.assessment_obligation_id == AssessmentObligation.assessment_obligation_id,
+    ).where(
+        AssessmentResult.assessment_result_id == assessment_result_id,
+        AssessmentResult.audit_id == audit.audit_id,
+        AssessmentResult.organization_id == user.organization_id,
+    )).one_or_none()
+    if row is None:
+        raise HTTPException(404, "Assessment result not found")
+    result, obligation = row
+    if not obligation.evaluator_rule_id or not result.verdict:
+        raise HTTPException(422, "Assessment result has no automatic remediation")
+    try:
+        return preview_rule_remediation(
+            db, user, audit, obligation.evaluator_rule_id, result.verdict,
+            result.assessment_result_id, request.parameters,
+        )
+    except RemediationError as error:
+        raise HTTPException(422, "Remediation parameters are invalid") from error
 
 
 @router.post("/{audit_id}/run", response_model=AuditResponse)

@@ -1,6 +1,7 @@
 """Bounded remediation read/preview service; it never executes recommendations."""
 import ipaddress
 import re
+from types import SimpleNamespace
 from uuid import UUID
 
 from sqlalchemy import select
@@ -108,6 +109,29 @@ def get_remediation(db: Session, user: User, finding_id: UUID):
     procedure, reason, source = _select(db, finding, audit)
     return _response(finding, procedure, reason, source)
 
+
+def _rule_finding(user, audit, rule_id, verdict, reference_id):
+    if audit is None or audit.organization_id != user.organization_id:
+        raise FindingNotFoundError("Assessment result not found")
+    try:
+        normalized = FindingVerdict(verdict)
+    except ValueError:
+        raise RemediationError("invalid_assessment_verdict") from None
+    return SimpleNamespace(
+        finding_id=reference_id, rule_id=rule_id, verdict=normalized,
+        remediation_procedure_id=None,
+    )
+
+
+def get_rule_remediation(db, user, audit, rule_id, verdict, reference_id):
+    """Resolve remediation for a framework result without reusing a mismatched baseline verdict."""
+    finding = _rule_finding(user, audit, rule_id, verdict, reference_id)
+    procedure, reason, source = _select(db, finding, audit)
+    response = _response(finding, procedure, reason, source)
+    response["assessment_result_id"] = response.pop("finding_id")
+    response["rule_id"] = rule_id
+    return response
+
 def _value(definition, value):
     if not isinstance(value, str) or any(ord(char) < 32 for char in value): raise RemediationError("invalid_parameters")
     kind = definition["type"]
@@ -148,8 +172,8 @@ def _render_sections(procedure, values):
         "rendered_rollback_steps": _render_section(procedure.rollback_steps, values),
     }
 
-def preview_remediation(db, user, finding_id, parameters):
-    finding = _finding(db, user, finding_id); audit = db.get(Audit, finding.audit_id); procedure, reason, source = _select(db, finding, audit)
+def _preview(db, finding, audit, parameters):
+    procedure, reason, source = _select(db, finding, audit)
     base = _response(finding, procedure, reason, source)
     if not procedure: return base
     definitions = {item["name"]: item for item in procedure.required_parameters}
@@ -159,3 +183,16 @@ def preview_remediation(db, user, finding_id, parameters):
         if definition.get("required", True) and name not in parameters: raise RemediationError("missing_required_parameters")
         if name in parameters: values[name] = _value(definition, parameters[name])
     return {**base, "status": "applicable", **_render_sections(procedure, values)}
+
+
+def preview_remediation(db, user, finding_id, parameters):
+    finding = _finding(db, user, finding_id)
+    return _preview(db, finding, db.get(Audit, finding.audit_id), parameters)
+
+
+def preview_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters):
+    finding = _rule_finding(user, audit, rule_id, verdict, reference_id)
+    response = _preview(db, finding, audit, parameters)
+    response["assessment_result_id"] = response.pop("finding_id")
+    response["rule_id"] = rule_id
+    return response

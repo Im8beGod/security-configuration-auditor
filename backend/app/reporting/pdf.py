@@ -220,10 +220,15 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
                 ("Assessment mode", scalar(item.get("assessment_method"))),
                 ("Implementation", scalar(item.get("implementation_status"))),
                 ("Result", scalar(item.get("verdict"), "Manual / unimplemented")),
+                ("Evaluator rule", scalar(item.get("evaluator_rule_id"))),
+                ("Technical finding", scalar(item.get("technical_finding_id"))),
                 ("Explanation", format_readable((item.get("details") or {}).get("explanation") or (item.get("details") or {}).get("state"))),
                 ("Evidence references", evidence_text((item.get("details") or {}).get("evidence_refs"))),
                 ("State / provenance", format_readable((item.get("details") or {}).get("effective_state") or item.get("details"))),
             ]))
+            if item.get("verdict") == "fail":
+                story.extend(remediation_story(item.get("remediation")))
+            story.append(Spacer(1, 8))
 
     SimpleDocTemplate(
         stream,

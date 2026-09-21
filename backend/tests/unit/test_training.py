@@ -58,6 +58,28 @@ def test_bounded_dsl_matches_extracts_and_runs_all_validation_families(monkeypat
     assert set(result["families"]) == {"positive", "alternate_values", "negative", "wrong_scope", "negation", "conflict", "regression"}
 
 
+def test_evidence_match_never_marks_unexecuted_validation_families_as_passed(monkeypatch):
+    payload = definition_payload()
+    payload["examples"] = []
+    definition = MappingDefinition.model_validate(payload)
+    mapping = SimpleNamespace(
+        mapping_id=uuid4(), organization_id=uuid4(),
+        target_field_id=definition.target_field_id,
+        structural_match=definition.structural_match.model_dump(mode="json"),
+    )
+    monkeypatch.setattr(repository, "published_mappings", lambda _db, _organization_id: [])
+    monkeypatch.setattr(
+        "app.training.service._validate_against_artifact",
+        lambda *_args, **_kwargs: {"status": "matched", "evidence_digest": "a" * 64},
+    )
+
+    result = validate_definition(None, mapping, definition, evidence_artifact_id=uuid4())
+
+    assert result["passed"] is False
+    assert result["semantic"]["status"] == "matched"
+    assert result["families"] and not any(result["families"].values())
+
+
 @pytest.mark.parametrize("mutation", [
     lambda value: value.update(target_field_id="invented.field"),
     lambda value: value["structural_match"].update(operation="eval"),

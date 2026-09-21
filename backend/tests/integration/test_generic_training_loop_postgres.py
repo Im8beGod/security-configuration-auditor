@@ -114,7 +114,7 @@ def test_unknown_upload_publish_and_reevaluate_without_redeployment(tmp_path, mo
             )
             db.add(audit)
             db.flush()
-            audit_id = audit.audit_id
+            audit_id, device_id = audit.audit_id, device.device_id
 
         AuditPipelineCoordinator(factory, storage).run(audit_id, organization_id)
         with factory() as db:
@@ -145,6 +145,57 @@ def test_unknown_upload_publish_and_reevaluate_without_redeployment(tmp_path, mo
             approve_mapping(db, admin, mapping_version_id)
             _mapping, pack = publish_mapping(db, admin, mapping_version_id)
             pack_id = pack.knowledge_pack_version_id
+        future_content = b"nebula-ssh enable\r\n"
+        with factory.begin() as db:
+            future_artifact_id = uuid4()
+            future_artifact = Artifact(
+                artifact_id=future_artifact_id, organization_id=organization_id,
+                original_filename="future-unknown.cfg",
+                storage_reference=storage.write(
+                    future_content, organization_id=organization_id,
+                    artifact_id=future_artifact_id,
+                ),
+                byte_size=len(future_content), sha256=sha256(future_content).hexdigest(),
+                encoding="utf-8", content_family=ArtifactContentFamily.TEXT,
+                evidence_type=ArtifactEvidenceType.CONFIGURATION,
+                status=ArtifactStatus.READY, uploaded_by=user_id,
+                source_metadata={"vendor_label": "Nebula Networks", "os_label": "StarOS"},
+            )
+            future_snapshot = Snapshot(
+                organization_id=organization_id, device_id=device_id,
+                grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED,
+                snapshot_hash=calculate_snapshot_hash([future_artifact.sha256]), artifact_count=1,
+                source=SnapshotSource.UPLOAD, status=SnapshotStatus.LOCKED, created_by=user_id,
+            )
+            db.add(future_snapshot); db.flush()
+            future_artifact.snapshot_id = future_snapshot.snapshot_id
+            db.add(future_artifact)
+            future_audit = Audit(
+                organization_id=organization_id, device_id=device_id,
+                snapshot_id=future_snapshot.snapshot_id, revision_number=3,
+                reevaluation_reason=AuditReevaluationReason.INITIAL,
+                status=AuditStatus.QUEUED, selected_frameworks=[], version_refs={},
+                profile_resolution={}, verdict_counts={}, severity_counts={}, coverage={},
+                created_by=user_id,
+            )
+            db.add(future_audit); db.flush()
+            future_audit_id = future_audit.audit_id
+
+        # Reconstruct the session/coordinator boundary to model a backend/worker restart.
+        restarted_factory = sessionmaker(
+            bind=connection, join_transaction_mode="create_savepoint",
+            autoflush=False, expire_on_commit=False,
+        )
+        AuditPipelineCoordinator(restarted_factory, storage).run(future_audit_id, organization_id)
+        with restarted_factory() as db:
+            future = db.get(Audit, future_audit_id)
+            assert future.version_refs["knowledge_pack_version_id"] == str(pack_id)
+            ssh = db.scalar(select(Finding).where(
+                Finding.audit_id == future_audit_id,
+                Finding.rule_id == "management.ssh.enabled",
+            ))
+            assert ssh.verdict is FindingVerdict.PASS
+            assert ssh.evidence_refs[0]["artifact_id"] == str(future_artifact_id)
         with factory() as db:
             other = db.get(User, other_user_id)
             assert list_unresolved(db, other) == []

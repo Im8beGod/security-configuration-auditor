@@ -11,10 +11,10 @@ from app.audit.service import create_audit, start_audit
 from app.cli.bootstrap_admin import bootstrap_admin
 from app.core.config import get_settings
 from app.db.engine import create_database_engine
-from app.db.models import Device, Finding, ReportStatus, User
+from app.db.models import AssessmentObligation, AssessmentResult, Audit, Device, Finding, ReportStatus, User
 from app.ingestion.service import ingest_artifact
 from app.ingestion.storage import LocalFilesystemArtifactStorage
-from app.remediation.service import preview_remediation
+from app.remediation.service import preview_remediation, preview_rule_remediation
 from app.reporting.service import create_report, generate_report, mark_generating
 from app.reporting.storage import LocalFilesystemReportStorage
 from app.snapshots.schemas import SnapshotCreate
@@ -79,7 +79,10 @@ def test_vendor_upload_audit_remediation_and_pdf(
             add_artifact(db, user, snapshot.snapshot_id, version.artifact_id)
             add_artifact(db, user, snapshot.snapshot_id, config.artifact_id)
             finalize_snapshot(db, user, snapshot.snapshot_id)
-            audit = create_audit(db, user, AuditCreate(snapshot_id=snapshot.snapshot_id))
+            audit = create_audit(db, user, AuditCreate(
+                snapshot_id=snapshot.snapshot_id,
+                selected_frameworks=["disa"] if profile.startswith("cisco.") else [],
+            ))
             audit, _ = start_audit(db, user, audit.audit_id)
             audit_id = audit.audit_id
 
@@ -96,6 +99,24 @@ def test_vendor_upload_audit_remediation_and_pdf(
             preview = preview_remediation(db, user, finding.finding_id, parameters)
             assert expected_command in preview["rendered_steps"]
             assert preview["rendered_verification_steps"] and preview["rendered_rollback_steps"]
+            if profile.startswith("cisco."):
+                result, obligation = db.execute(select(AssessmentResult, AssessmentObligation).join(
+                    AssessmentObligation,
+                    AssessmentResult.assessment_obligation_id == AssessmentObligation.assessment_obligation_id,
+                ).where(
+                    AssessmentResult.audit_id == audit_id,
+                    AssessmentObligation.obligation_key == "v-202074.idle-timeout",
+                )).one()
+                assert result.verdict == "fail" and result.technical_finding_id is None
+                assert result.result_details["baseline_finding"]["verdict"] == "pass"
+                assert result.result_details["evidence_refs"][0]["artifact_id"] == str(config.artifact_id)
+                framework_preview = preview_rule_remediation(
+                    db, user, db.get(Audit, audit_id), obligation.evaluator_rule_id,
+                    result.verdict, result.assessment_result_id,
+                    {"vty_range": "0 4", "minutes": "5"},
+                )
+                assert framework_preview["procedure_key"] == "cisco.vty-idle-timeout"
+                assert "exec-timeout 5 0" in framework_preview["rendered_steps"]
             report, _ = create_report(db, user, audit_id)
             report_id = report.report_id
         with factory.begin() as db:

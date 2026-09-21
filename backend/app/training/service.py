@@ -199,8 +199,6 @@ def validate_definition(db: Session, mapping: MappingVersion, definition: Mappin
     regressions = families["regression"]
     collision = any(item.mapping_id != mapping.mapping_id and item.target_field_id == mapping.target_field_id and item.structural_match == mapping.structural_match for item in relevant)
     family_results = {family: bool(cases) and all(case["passed"] for case in cases) for family, cases in families.items()}
-    if evidence_artifact_id is not None and not definition.examples:
-        family_results = {family: True for family in VALIDATION_FAMILIES}
     if collision:
         family_results["regression"] = False
         regressions.append({"passed": False, "error": "published_mapping_collision"})

@@ -106,16 +106,25 @@ def _classify(fact: SecurityFact, persisted_operation: FactOperation | None = No
     if not isinstance(refs, list) or not refs:
         raise EffectiveStateValidationError("SecurityFact ordering provenance is missing")
     artifact_ids = {item.get("artifact_id") for item in refs if isinstance(item, dict)}
-    lines = [item.get("start_line") for item in refs if isinstance(item, dict)]
-    if len(artifact_ids) != 1 or None in artifact_ids or not lines or any(
-        not isinstance(item, int) or item < 1 for item in lines
-    ):
+    positions = []
+    for reference in refs:
+        if not isinstance(reference, dict):
+            continue
+        line = reference.get("start_line")
+        structured_order = reference.get("structured_order")
+        if isinstance(line, int) and line >= 1:
+            positions.append(line)
+        elif isinstance(structured_order, int) and structured_order >= 1:
+            positions.append(structured_order)
+        else:
+            raise EffectiveStateValidationError("SecurityFact ordering provenance is malformed")
+    if len(artifact_ids) != 1 or None in artifact_ids or not positions:
         raise EffectiveStateValidationError("SecurityFact ordering provenance is malformed")
     if operation is FactOperation.RESET and value.type is not TypedValueType.NULL:
         raise EffectiveStateValidationError("SecurityFact reset value is malformed")
     if operation is FactOperation.REMOVE and value.type is TypedValueType.NULL:
         raise EffectiveStateValidationError("SecurityFact removal value is malformed")
-    return ClassifiedFact(fact, scope, value, operation, next(iter(artifact_ids)), min(lines))
+    return ClassifiedFact(fact, scope, value, operation, next(iter(artifact_ids)), min(positions))
 
 
 def _resolve_scalar_field(audit_id: UUID, device_id: UUID, field_id: str, facts: tuple[ClassifiedFact, ...]) -> list[EffectiveStateDraft]:

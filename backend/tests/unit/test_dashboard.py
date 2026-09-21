@@ -44,3 +44,17 @@ def test_coverage_aggregates_counts_and_recent_audits_are_bounded_and_ordered():
     assert result["coverage"]["implementation_coverage"]=={"numerator":3,"denominator":5,"percentage":60.0,"status":"assessed"}
     assert result["coverage"]["decision_coverage"]=={"numerator":1,"denominator":4,"percentage":25.0,"status":"assessed"}
     assert result["recent_audits"][0]["audit_id"]==a2.audit_id
+
+
+def test_assessment_coverage_uses_persisted_result_contracts():
+    current, stale = device("current"), device("stale")
+    audit_current = audit(current.device_id, AuditStatus.COMPLETED, 1)
+    audit_stale = audit(stale.device_id, AuditStatus.COMPLETED, 1)
+    rows = [
+        SimpleNamespace(audit_id=audit_current.audit_id, applicability_status="applicable", assessment_method="automatic", implementation_status="implemented", verdict="fail"),
+        SimpleNamespace(audit_id=audit_current.audit_id, applicability_status="applicable", assessment_method="manual", implementation_status="manual", verdict=None),
+        SimpleNamespace(audit_id=audit_current.audit_id, applicability_status="applicable", assessment_method="automatic", implementation_status="unimplemented", verdict=None),
+        SimpleNamespace(audit_id=audit_stale.audit_id, applicability_status="not_applicable", assessment_method="automatic", implementation_status="implemented", verdict="pass"),
+    ]
+    result = build_dashboard([current], [audit_current], [], rows)
+    assert result["assessment_coverage"] == {"automatic": 1, "manual": 1, "unimplemented": 1, "pass": 0, "fail": 1, "unknown": 0}

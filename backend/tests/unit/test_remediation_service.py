@@ -8,7 +8,7 @@ from app.remediation.catalog import (
     REMEDIATION_PROCEDURE_REGISTRY,
     REVIEWED_CISCO_PROCEDURES_BY_RULE,
 )
-from app.remediation.service import _select, preview_remediation
+from app.remediation.service import _select, preview_remediation, preview_rule_remediation
 
 
 def definition(kind, **extra): return {"name": "target", "type": kind, "required": True, **extra}
@@ -117,3 +117,23 @@ def test_explicit_procedure_reference_must_match_the_finding_rule():
     assert procedure is None
     assert reason == "invalid_registry_entry"
     assert source is None
+
+
+def test_framework_preview_enforces_failed_threshold_and_returns_canonical_parameters():
+    db, _finding, audit = _catalog_context("management.idle_timeout.maximum", "arista.eos.4@1.0.0")
+    audit.organization_id = UUID(int=1)
+    preview = preview_rule_remediation(
+        db, SimpleNamespace(organization_id=UUID(int=1)), audit,
+        "management.idle_timeout.maximum", "fail", uuid4(),
+        {"minutes": "5"},
+        policy_parameters={"maximum_admin_idle_timeout_seconds": 300},
+    )
+    assert preview["validated_parameters"] == {"minutes": "5"}
+    assert "idle-timeout 5" in preview["rendered_steps"]
+    with pytest.raises(RemediationError, match="framework_parameter_exceeds_threshold"):
+        preview_rule_remediation(
+            db, SimpleNamespace(organization_id=UUID(int=1)), audit,
+            "management.idle_timeout.maximum", "fail", uuid4(),
+            {"minutes": "6"},
+            policy_parameters={"maximum_admin_idle_timeout_seconds": 300},
+        )

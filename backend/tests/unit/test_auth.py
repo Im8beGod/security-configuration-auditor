@@ -243,6 +243,7 @@ def test_api_surface_and_configured_prefix(auth_settings):
             "/api/test/audits/{audit_id}": {"get"},
                 "/api/test/audits/{audit_id}/profile-resolution": {"get"},
                 "/api/test/audits/{audit_id}/assessment-results": {"get"},
+                "/api/test/audits/{audit_id}/assessment-results/{assessment_result_id}/remediation/preview": {"post"},
             "/api/test/audits/{audit_id}/reevaluation-eligibility": {"get"},
             "/api/test/audits/{audit_id}/revisions": {"get"},
             "/api/test/audits/{audit_id}/re-evaluate": {"post"},

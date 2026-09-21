@@ -123,11 +123,14 @@ def _rule_finding(user, audit, rule_id, verdict, reference_id):
     )
 
 
-def get_rule_remediation(db, user, audit, rule_id, verdict, reference_id):
+def get_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters=None, *, policy_parameters=None):
     """Resolve remediation for a framework result without reusing a mismatched baseline verdict."""
     finding = _rule_finding(user, audit, rule_id, verdict, reference_id)
     procedure, reason, source = _select(db, finding, audit)
-    response = _response(finding, procedure, reason, source)
+    response = (
+        _preview(db, finding, audit, parameters, policy_parameters=policy_parameters)
+        if parameters is not None else _response(finding, procedure, reason, source)
+    )
     response["assessment_result_id"] = response.pop("finding_id")
     response["rule_id"] = rule_id
     return response
@@ -172,17 +175,30 @@ def _render_sections(procedure, values):
         "rendered_rollback_steps": _render_section(procedure.rollback_steps, values),
     }
 
-def _preview(db, finding, audit, parameters):
+def _validate_framework_parameters(policy_parameters, values):
+    maximum = (policy_parameters or {}).get("maximum_admin_idle_timeout_seconds")
+    if maximum is None or "minutes" not in values:
+        return
+    try:
+        minutes, maximum_seconds = int(values["minutes"]), int(maximum)
+    except (TypeError, ValueError) as exc:
+        raise RemediationError("invalid_parameters") from exc
+    if minutes * 60 > maximum_seconds:
+        raise RemediationError("framework_parameter_exceeds_threshold")
+
+
+def _preview(db, finding, audit, parameters, *, policy_parameters=None):
     procedure, reason, source = _select(db, finding, audit)
     base = _response(finding, procedure, reason, source)
-    if not procedure: return base
+    if not procedure or base["status"] not in {"applicable", "requires_parameters"}: return base
     definitions = {item["name"]: item for item in procedure.required_parameters}
     if set(parameters) - set(definitions): raise RemediationError("invalid_parameters")
     values = {}
     for name, definition in definitions.items():
         if definition.get("required", True) and name not in parameters: raise RemediationError("missing_required_parameters")
         if name in parameters: values[name] = _value(definition, parameters[name])
-    return {**base, "status": "applicable", **_render_sections(procedure, values)}
+    _validate_framework_parameters(policy_parameters, values)
+    return {**base, "status": "applicable", "validated_parameters": values, **_render_sections(procedure, values)}
 
 
 def preview_remediation(db, user, finding_id, parameters):
@@ -190,9 +206,9 @@ def preview_remediation(db, user, finding_id, parameters):
     return _preview(db, finding, db.get(Audit, finding.audit_id), parameters)
 
 
-def preview_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters):
+def preview_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters, *, policy_parameters=None):
     finding = _rule_finding(user, audit, rule_id, verdict, reference_id)
-    response = _preview(db, finding, audit, parameters)
+    response = _preview(db, finding, audit, parameters, policy_parameters=policy_parameters)
     response["assessment_result_id"] = response.pop("finding_id")
     response["rule_id"] = rule_id
     return response

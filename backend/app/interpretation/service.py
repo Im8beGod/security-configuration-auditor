@@ -481,6 +481,14 @@ def interpret_json_structural_ir(
         raise InterpretationValidationError("ir_provenance_invalid", "JSON IR provenance is inconsistent")
     pack = knowledge_pack or load_validated_knowledge_pack(profile_version_id)
     validate_knowledge_pack(pack, expected_profile_id=profile.profile_id, expected_profile_version_id=profile.profile_version_id, allowed_extractors=frozenset(EXTRACTORS), scope_resolver_types=SCOPE_RESOLVER_TYPES)
+    leaves = tuple(node for node in ir.nodes if not isinstance(node.value, (dict, list)))
+    if ir.truncated:
+        return InterpretationResult(
+            facts=(),
+            diagnostics=tuple(InterpretationDiagnostic("json_evidence_incomplete", node.node_id) for node in leaves),
+            metrics=InterpretationMetrics(len(leaves), 0, 0, 0, len(leaves), len(leaves)),
+            unresolved_node_ids=tuple(node.node_id for node in leaves),
+        )
     facts: list[SecurityFactDraft] = []
     diagnostics: list[InterpretationDiagnostic] = []
     matched: set[str] = set()
@@ -501,7 +509,6 @@ def interpret_json_structural_ir(
                 continue
             facts.append(_build_json_fact(context=context, ir=ir, pack=pack, mapping=mapping, value=typed, scope=scope, node=node))
             matched.add(node.node_id)
-    leaves = tuple(node for node in ir.nodes if not isinstance(node.value, (dict, list)))
     return InterpretationResult(
         facts=tuple(facts), diagnostics=tuple(diagnostics),
         metrics=InterpretationMetrics(len(leaves), len(matched), len(facts), len(facts), len(leaves) - len(matched), len(diagnostics)),
@@ -511,9 +518,11 @@ def interpret_json_structural_ir(
 
 def _build_json_fact(*, context: InterpretationContext, ir: JsonStructuralIR, pack: KnowledgePack, mapping: DeclarativeMapping, value: TypedValue, scope: ScopeRef, node: JsonNode) -> SecurityFactDraft:
     evidence = EvidenceRef(
-        artifact_id=node.source.artifact_id, start_line=node.order, end_line=node.order,
+        artifact_id=node.source.artifact_id, start_line=None, end_line=None,
         source_path=node.source.source_label, ir_node_id=node.node_id,
         evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT,
+        structured_path=node.path,
+        structured_order=node.order,
     )
     identity = json.dumps({"audit_id": str(context.audit_id), "mapping_version_id": str(mapping.mapping_version_id), "source_ir_node_ids": (node.node_id,), "field_id": mapping.field_id, "scope": scope.to_dict(), "entity": None, "value": value.to_dict()}, sort_keys=True, separators=(",", ":"))
     return SecurityFactDraft(
@@ -1081,8 +1090,8 @@ def _persist_unresolved_blocks(
             parent = nodes.get(node.parent_id) if node.parent_id else None
             artifact_id = node.artifact_id if isinstance(ir, StructuralIR) else node.source.artifact_id
             source_label = node.source_label if isinstance(ir, StructuralIR) else node.source.source_label
-            start_line = node.source_start if isinstance(ir, StructuralIR) else node.order
-            end_line = node.source_end if isinstance(ir, StructuralIR) else node.order
+            start_line = node.source_start if isinstance(ir, StructuralIR) else node.order if isinstance(ir, XmlStructuralIR) else None
+            end_line = node.source_end if isinstance(ir, StructuralIR) else node.order if isinstance(ir, XmlStructuralIR) else None
             identity = f"{context.audit_id}:{artifact_id}:{node.node_id}"
             fingerprint = hashlib.sha256(identity.encode()).hexdigest()
             exists = db.scalar(select(UnresolvedBlock.unresolved_block_id).where(
@@ -1144,6 +1153,7 @@ def _persist_unresolved_blocks(
                     "end_line": end_line,
                     "source_path": source_label,
                     "ir_node_id": node.node_id,
+                    "structured_path": list(node.path) if isinstance(ir, JsonStructuralIR) else None,
                     "evidence_type": (
                         ArtifactEvidenceType.CONFIGURATION.value
                         if isinstance(ir, StructuralIR)

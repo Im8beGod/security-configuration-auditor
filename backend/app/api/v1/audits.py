@@ -234,13 +234,30 @@ def assessment_remediation_preview_endpoint(
     if row is None:
         raise HTTPException(404, "Assessment result not found")
     result, obligation = row
-    if not obligation.evaluator_rule_id or not result.verdict:
+    if (
+        not obligation.evaluator_rule_id
+        or result.verdict != "fail"
+        or result.applicability_status != "applicable"
+        or result.assessment_method != "automatic"
+        or result.implementation_status != "implemented"
+    ):
         raise HTTPException(422, "Assessment result has no automatic remediation")
     try:
-        return preview_rule_remediation(
+        preview = preview_rule_remediation(
             db, user, audit, obligation.evaluator_rule_id, result.verdict,
             result.assessment_result_id, request.parameters,
+            policy_parameters=obligation.policy_parameters,
         )
+        result.result_details = {
+            **dict(result.result_details or {}),
+            "remediation_preview": {
+                "procedure_key": preview.get("procedure_key"),
+                "procedure_version": preview.get("procedure_version"),
+                "parameters": preview.get("validated_parameters", {}),
+            },
+        }
+        db.commit()
+        return preview
     except RemediationError as error:
         raise HTTPException(422, "Remediation parameters are invalid") from error
 

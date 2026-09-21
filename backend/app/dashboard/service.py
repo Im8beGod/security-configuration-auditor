@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.compliance.verdicts import FindingSeverity, FindingVerdict
-from app.db.models import Audit, AuditStatus, Device, Finding, User
+from app.db.models import AssessmentResult, Audit, AuditStatus, Device, Finding, User
 
 
 COMPLETED = {AuditStatus.COMPLETED, AuditStatus.COMPLETED_WITH_UNKNOWNS, AuditStatus.COMPLETED_WITH_ERRORS}
@@ -39,7 +39,23 @@ def _coverage(audits):
     return result
 
 
-def build_dashboard(devices: Iterable[Device], audits: Iterable[Audit], findings: Iterable[Finding], *, recent_limit: int = 20):
+def _assessment_coverage(results):
+    counts = Counter()
+    for result in results:
+        if getattr(result, "applicability_status", None) != "applicable":
+            continue
+        implementation = getattr(result, "implementation_status", None)
+        method = getattr(result, "assessment_method", None)
+        if implementation == "unimplemented": counts["unimplemented"] += 1
+        elif implementation == "manual" or method == "manual": counts["manual"] += 1
+        elif implementation == "implemented" and method == "automatic":
+            counts["automatic"] += 1
+            verdict = getattr(result, "verdict", None)
+            if verdict in {"pass", "fail", "unknown"}: counts[verdict] += 1
+    return {key: counts[key] for key in ("automatic", "manual", "unimplemented", "pass", "fail", "unknown")}
+
+
+def build_dashboard(devices: Iterable[Device], audits: Iterable[Audit], findings: Iterable[Finding], assessment_results=(), *, recent_limit: int = 20):
     devices = list(devices); audits = sorted(audits, key=_audit_order, reverse=True); findings = list(findings)
     audits_by_device = defaultdict(list)
     for audit in audits: audits_by_device[audit.device_id].append(audit)
@@ -65,7 +81,9 @@ def build_dashboard(devices: Iterable[Device], audits: Iterable[Audit], findings
     recent=[]
     for audit in audits[:recent_limit]:
         recent.append({"audit_id":audit.audit_id,"device_id":audit.device_id,"device_name":names.get(audit.device_id,"Unknown device"),"status":_value(audit.status),"created_at":audit.created_at,"completed_at":audit.completed_at,"fail_count":_count(audit.verdict_counts,"fail"),"unknown_count":_count(audit.verdict_counts,"unknown"),"critical_count":_count(audit.severity_counts,"critical"),"high_count":_count(audit.severity_counts,"high")})
-    return {"total_devices":len(devices),"audited_devices":len(selected),"unaudited_devices":len(devices)-len(selected),"critical_risk_devices":len(critical),"high_risk_devices":len(high_candidates-critical),"devices_needing_review":len(review),"verdict_distribution":dict(verdicts),"severity_distribution":dict(severities),"audit_status_distribution":dict(statuses),"vendor_distribution":dict(vendors),"profile_distribution":dict(profiles),"device_family_distribution":dict(families),"coverage":_coverage(selected),"devices":rows,"recent_audits":recent}
+    selected_ids = {audit.audit_id for audit in selected}
+    assessment_results = [item for item in assessment_results if item.audit_id in selected_ids]
+    return {"total_devices":len(devices),"audited_devices":len(selected),"unaudited_devices":len(devices)-len(selected),"critical_risk_devices":len(critical),"high_risk_devices":len(high_candidates-critical),"devices_needing_review":len(review),"verdict_distribution":dict(verdicts),"severity_distribution":dict(severities),"audit_status_distribution":dict(statuses),"vendor_distribution":dict(vendors),"profile_distribution":dict(profiles),"device_family_distribution":dict(families),"coverage":_coverage(selected),"assessment_coverage":_assessment_coverage(assessment_results),"devices":rows,"recent_audits":recent}
 
 
 def get_dashboard(db: Session, user: User):
@@ -73,4 +91,5 @@ def get_dashboard(db: Session, user: User):
     audits=list(db.scalars(select(Audit).where(Audit.organization_id==user.organization_id)))
     audit_ids=[audit.audit_id for audit in audits]
     findings=list(db.scalars(select(Finding).where(Finding.audit_id.in_(audit_ids)))) if audit_ids else []
-    return build_dashboard(devices,audits,findings)
+    results=list(db.scalars(select(AssessmentResult).where(AssessmentResult.organization_id==user.organization_id, AssessmentResult.audit_id.in_(audit_ids)))) if audit_ids else []
+    return build_dashboard(devices,audits,findings,results)

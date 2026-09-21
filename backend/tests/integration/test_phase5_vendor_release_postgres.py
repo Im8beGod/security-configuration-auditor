@@ -15,6 +15,7 @@ from app.db.models import AssessmentObligation, AssessmentResult, Audit, Device,
 from app.ingestion.service import ingest_artifact
 from app.ingestion.storage import LocalFilesystemArtifactStorage
 from app.remediation.service import preview_remediation, preview_rule_remediation
+from app.remediation.service import RemediationError
 from app.reporting.service import create_report, generate_report, mark_generating
 from app.reporting.storage import LocalFilesystemReportStorage
 from app.snapshots.schemas import SnapshotCreate
@@ -121,16 +122,27 @@ def test_vendor_upload_audit_remediation_and_pdf(
                     db, user, db.get(Audit, audit_id), obligation.evaluator_rule_id,
                     result.verdict, result.assessment_result_id,
                     {"vty_range": "0 4", "minutes": "5"},
+                    policy_parameters=obligation.policy_parameters,
                 )
                 assert framework_preview["procedure_key"] == "cisco.vty-idle-timeout"
                 assert "exec-timeout 5 0" in framework_preview["rendered_steps"]
+                with pytest.raises(RemediationError):
+                    preview_rule_remediation(
+                        db, user, db.get(Audit, audit_id), obligation.evaluator_rule_id,
+                        result.verdict, result.assessment_result_id,
+                        {"vty_range": "0 4", "minutes": "6"},
+                        policy_parameters=obligation.policy_parameters,
+                    )
+                result.result_details = {**result.result_details, "remediation_preview": {"parameters": framework_preview["validated_parameters"]}}
+                db.flush()
             report, _ = create_report(db, user, audit_id)
             report_id = report.report_id
         with factory.begin() as db:
             mark_generating(db, report_id)
             generated = generate_report(db, report_id, reports)
             assert generated.status is ReportStatus.READY
-            assert reports.read(generated.storage_reference).startswith(b"%PDF")
+            pdf = reports.read(generated.storage_reference)
+            assert pdf.startswith(b"%PDF") and b"{minutes}" not in pdf
     finally:
         outer.rollback()
         connection.close()

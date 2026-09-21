@@ -121,6 +121,8 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
                 "remediation": get_rule_remediation(
                     db, user, audit, obligation.evaluator_rule_id, result.verdict,
                     result.assessment_result_id,
+                    (result.result_details or {}).get("remediation_preview", {}).get("parameters"),
+                    policy_parameters=obligation.policy_parameters,
                 ) if user and obligation.evaluator_rule_id and result.verdict else {
                     "status": "unavailable", "reason": "no_automatic_evaluator",
                 },

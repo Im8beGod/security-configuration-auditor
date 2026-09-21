@@ -63,11 +63,13 @@ class ScopeRef:
 @dataclass(frozen=True)
 class EvidenceRef:
     artifact_id: UUID
-    start_line: int
-    end_line: int
+    start_line: int | None
+    end_line: int | None
     source_path: str
     ir_node_id: str
     evidence_type: ArtifactEvidenceType
+    structured_path: tuple[str | int, ...] | None = None
+    structured_order: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +79,8 @@ class EvidenceRef:
             "source_path": self.source_path,
             "ir_node_id": self.ir_node_id,
             "evidence_type": self.evidence_type.value,
+            "structured_path": list(self.structured_path) if self.structured_path is not None else None,
+            "structured_order": self.structured_order,
         }
 
 

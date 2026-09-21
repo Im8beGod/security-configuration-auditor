@@ -111,8 +111,10 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
             start, end = ref.get("start_line"), ref.get("end_line")
             if isinstance(start, int) and isinstance(end, int) and start >= 1 and end >= start:
                 location = f"lines {start}-{end}" if start != end else f"line {start}"
+            elif isinstance(ref.get("structured_path"), list):
+                location = "JSON/XML path " + "/".join(str(item) for item in ref["structured_path"])
             else:
-                location = "line range not provided"
+                location = "structured location not provided"
             lines.append(f"{_escape(str(source))} ({_escape(location)})")
         return "<br/>".join(lines)
 
@@ -122,7 +124,9 @@ def build_device_compliance_pdf(document: dict[str, Any]) -> bytes:
         status = remediation.get("status")
         if status == "not_required":
             return [Paragraph("Reviewed remediation", subheading), labeled_table([("Status", "Not required for this finding")])]
-        if status not in {"applicable", "requires_parameters"}:
+        if status == "requires_parameters":
+            return [Paragraph("Reviewed remediation", subheading), labeled_table([("Status", "Validated parameters are required before commands can be rendered")])]
+        if status != "applicable":
             return [Paragraph("Reviewed remediation", subheading), labeled_table([("Status", f"{UNAVAILABLE} ({scalar(remediation.get('reason'), 'reason not provided')})")])]
         steps = remediation.get("rendered_steps") or remediation.get("ordered_steps")
         if not isinstance(steps, list) or not steps:

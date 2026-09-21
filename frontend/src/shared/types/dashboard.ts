@@ -6,5 +6,5 @@ export interface Dashboard {
   critical_risk_devices: number; high_risk_devices: number; devices_needing_review: number
   verdict_distribution: Record<string, number>; severity_distribution: Record<string, number>; audit_status_distribution: Record<string, number>
   vendor_distribution: Record<string, number>; profile_distribution: Record<string, number>; device_family_distribution: Record<string, number>
-  coverage: Record<string, CoverageMetric>; devices: DashboardDevice[]; recent_audits: RecentAudit[]
+  coverage: Record<string, CoverageMetric>; assessment_coverage: Record<string, number>; devices: DashboardDevice[]; recent_audits: RecentAudit[]
 }

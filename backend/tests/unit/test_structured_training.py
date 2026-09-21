@@ -81,3 +81,26 @@ def test_published_json_mapping_produces_provenanced_fact():
     assert result.facts[0].value.value is False
     assert result.facts[0].evidence_refs[0].artifact_id == UUID(int=1)
     assert result.facts[0].evidence_refs[0].evidence_type is ArtifactEvidenceType.STRUCTURED_EXPORT
+    assert result.facts[0].evidence_refs[0].start_line is None
+    assert result.facts[0].evidence_refs[0].structured_path == ("management", "ssh", "enabled")
+    assert result.facts[0].evidence_refs[0].structured_order is not None
+
+
+def test_minified_nested_json_is_exact_and_incomplete_json_emits_no_facts():
+    definition = _definition()
+    row = SimpleNamespace(
+        mapping_id=uuid4(), mapping_version_id=uuid4(), target_field_id=definition.target_field_id,
+        profile_applicability=definition.profile_applicability.model_dump(mode="json"), structural_match=definition.structural_match.model_dump(mode="json"),
+        value_extraction=definition.value_extraction.model_dump(mode="json"), unit_conversion=definition.unit_conversion.model_dump(mode="json"),
+        scope_resolution=definition.scope_resolution.model_dump(mode="json"), negation_behavior=definition.negation_behavior.model_dump(mode="json"),
+        removal_behavior=definition.removal_behavior.model_dump(mode="json"), default_behavior=definition.default_behavior.model_dump(mode="json"), examples=[],
+    )
+    baseline = load_validated_knowledge_pack(GENERIC_JSON.profile_version_id)
+    pack = KnowledgePack(baseline.knowledge_pack_id, uuid4(), baseline.name, "1.0.1", baseline.schema_version, baseline.profile_id, baseline.profile_version_id, (_training_mapping(row, GENERIC_JSON.profile_version_id),))
+    valid = interpret_json_structural_ir(_ir('{"management":{"ssh":{"enabled":true,"nested":{"a":1}}}}'), InterpretationContext(UUID(int=10), UUID(int=4), UUID(int=3)), profile_version_id=GENERIC_JSON.profile_version_id, knowledge_pack=pack)
+    assert valid.facts[0].value.value is True
+    source = ArtifactProvenance(UUID(int=1), UUID(int=2), UUID(int=3), "partial.json", "a" * 64, {})
+    partial = JsonTreeReader().parse(StructuralParseRequest('{"management":{"ssh":{"enabled":true}}}', source, input_truncated=True))
+    result = interpret_json_structural_ir(partial, InterpretationContext(UUID(int=10), UUID(int=4), UUID(int=3)), profile_version_id=GENERIC_JSON.profile_version_id, knowledge_pack=pack)
+    assert not result.facts and result.unresolved_node_ids
+    assert {item.code for item in result.diagnostics} == {"json_evidence_incomplete"}

@@ -1,9 +1,13 @@
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
+from fastapi.testclient import TestClient
+from app.auth.dependencies import get_current_user
 from app.compliance.verdicts import FindingSeverity, FindingVerdict
 from app.db.models import AuditStatus, DeviceClass
+from app.db.session import get_db
 from app.dashboard.service import build_dashboard
+from app.main import create_app
 
 NOW=datetime(2026,9,8,tzinfo=timezone.utc)
 def device(name="device"):
@@ -58,3 +62,16 @@ def test_assessment_coverage_uses_persisted_result_contracts():
     ]
     result = build_dashboard([current], [audit_current], [], rows)
     assert result["assessment_coverage"] == {"automatic": 1, "manual": 1, "unimplemented": 1, "pass": 0, "fail": 1, "unknown": 0}
+
+
+def test_dashboard_api_serializes_assessment_coverage(auth_settings, monkeypatch):
+    application = create_app(auth_settings)
+    application.dependency_overrides[get_current_user] = lambda: SimpleNamespace()
+    application.dependency_overrides[get_db] = lambda: SimpleNamespace()
+    monkeypatch.setattr("app.api.v1.dashboard.get_dashboard", lambda _db, _user: build_dashboard([], [], []))
+    with TestClient(application) as client:
+        response = client.get("/api/v1/dashboard")
+    assert response.status_code == 200
+    assert response.json()["assessment_coverage"] == {
+        "automatic": 0, "manual": 0, "unimplemented": 0, "pass": 0, "fail": 0, "unknown": 0,
+    }

@@ -45,5 +45,6 @@ class DashboardResponse(BaseModel):
     profile_distribution: dict[str, int]
     device_family_distribution: dict[str, int]
     coverage: dict[str, CoverageAggregate]
+    assessment_coverage: dict[str, int]
     devices: list[DashboardDevice]
     recent_audits: list[RecentAudit]

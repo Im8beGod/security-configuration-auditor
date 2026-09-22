@@ -23,3 +23,8 @@ MAPPINGS = (
     _mapping(5, "time.ntp.server", NodeMatcher("ntp", ("server",)), "ntp_server", {TypedValueType.IP_ADDRESS, TypedValueType.STRING}, negation=NegationBehavior.REMOVE_VALUE, removal=True),
     _mapping(6, "management.remote.source.restriction.configured", NodeMatcher("ip", ("access-group",), "management", ("ssh",)), "arista_service_acl", {TypedValueType.BOOLEAN}, scope="arista_management_service"),
 )
+
+
+PHASE7_MAPPINGS = MAPPINGS + (
+    _mapping(7, "time.ntp.configured", NodeMatcher("ntp", ("server",)), "ntp_configured", {TypedValueType.BOOLEAN}),
+)

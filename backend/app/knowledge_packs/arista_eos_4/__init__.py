@@ -1,3 +1,3 @@
-from app.knowledge_packs.arista_eos_4.manifest import ARISTA_EOS_4_KNOWLEDGE_PACK
+from app.knowledge_packs.arista_eos_4.manifest import ARISTA_EOS_4_KNOWLEDGE_PACK, ARISTA_EOS_4_KNOWLEDGE_PACK_V1
 
-__all__ = ["ARISTA_EOS_4_KNOWLEDGE_PACK"]
+__all__ = ["ARISTA_EOS_4_KNOWLEDGE_PACK", "ARISTA_EOS_4_KNOWLEDGE_PACK_V1"]

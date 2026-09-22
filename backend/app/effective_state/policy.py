@@ -9,7 +9,7 @@ from uuid import UUID
 from app.interpretation.knowledge_pack import NegationBehavior
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
 from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1
-from app.knowledge_packs.arista_eos_4 import ARISTA_EOS_4_KNOWLEDGE_PACK
+from app.knowledge_packs.arista_eos_4 import ARISTA_EOS_4_KNOWLEDGE_PACK, ARISTA_EOS_4_KNOWLEDGE_PACK_V1
 from app.knowledge_packs.fortios_7 import (
     FORTIOS_7_KNOWLEDGE_PACK, FORTIOS_7_KNOWLEDGE_PACK_V1_1,
     FORTIOS_7_KNOWLEDGE_PACK_V1_2,
@@ -180,6 +180,7 @@ _SEALED_PACK_MAPPING_POLICIES = _declared_mapping_policies(
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1,
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+    ARISTA_EOS_4_KNOWLEDGE_PACK_V1,
     ARISTA_EOS_4_KNOWLEDGE_PACK,
 )
 MAPPING_OPERATION_POLICIES: Mapping[tuple[UUID, UUID], MappingOperationPolicy] = (

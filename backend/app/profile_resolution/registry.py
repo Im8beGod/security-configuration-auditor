@@ -281,7 +281,7 @@ ARISTA_EOS_4 = ProfileManifest(
     device_classes=frozenset({DeviceClass.SWITCH, DeviceClass.ROUTER}),
     accepted_evidence_types=frozenset(ArtifactEvidenceType),
     structural_reader_name="indentation_cli.v1",
-    knowledge_pack_name="arista_eos_4@1.0.0",
+    knowledge_pack_name="arista_eos_4@1.1.0",
     capabilities=frozenset({
         "profile_detection", "structural_parsing", "semantic_interpretation",
         "effective_state_resolution", "deterministic_compliance",
@@ -295,6 +295,7 @@ ARISTA_EOS_4 = ProfileManifest(
             "management.session.idle_timeout",
             "logging.remote.destination",
             "time.ntp.server",
+            "time.ntp.configured",
             "management.remote.source.restriction.configured",
         ),
         "command_forms": (

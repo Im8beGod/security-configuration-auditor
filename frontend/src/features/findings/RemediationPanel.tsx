@@ -9,7 +9,8 @@ export function RemediationPanel({ findingId }: { findingId: string }) {
   const preview = useMutation({ mutationFn: () => previewRemediation(findingId, values) })
 
   if (query.isPending) return <section className="panel"><h2>Remediation</h2><p className="quiet-state">Loading reviewed remediation guidance...</p></section>
-  if (query.isError || !query.data || query.data.status === 'unavailable') return <section className="panel"><h2>Remediation</h2><p>Remediation guidance is not available for this exact supported profile/version.</p></section>
+  if (query.isError || !query.data) return <section className="panel"><h2>Remediation</h2><p>Remediation guidance could not be resolved safely.</p></section>
+  if (query.data.status === 'unavailable') return <section className="panel"><h2>Remediation unavailable</h2><p>No reviewed procedure is available for this exact failed rule and profile/version.</p><p className="quiet-state">Reason: {query.data.reason ?? 'not provided'}</p></section>
   if (query.data.status === 'not_required') return <section className="panel"><h2>Remediation</h2><p>No remediation is required for this Finding's current verdict.</p></section>
 
   const item = preview.data ?? query.data

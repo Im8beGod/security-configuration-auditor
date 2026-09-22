@@ -84,10 +84,19 @@ def test_arista_structure_normalization_and_provenance_are_bounded():
     assert facts["management.session.idle_timeout"].value.value == 600
     assert facts["logging.remote.destination"].value.value == "192.0.2.40"
     assert facts["time.ntp.server"].value.value == "time.example.invalid"
+    assert facts["time.ntp.configured"].value.value is True
     assert facts["management.remote.source.restriction.configured"].value.value is True
     assert all(ref.artifact_id == UUID(int=20) for fact in result.facts for ref in fact.evidence_refs)
     assert all(ref.source_path == "representative.cfg" for fact in result.facts for ref in fact.evidence_refs)
     assert result.unresolved_node_ids
+
+
+def test_arista_ntp_configuration_is_not_inferred_from_missing_or_invalid_evidence():
+    _ir, missing = _interpret("management ssh\n   no shutdown\n")
+    assert "time.ntp.configured" not in {item.field_id for item in missing.facts}
+    _ir, invalid = _interpret("ntp server not/a/host\n")
+    assert "time.ntp.configured" not in {item.field_id for item in invalid.facts}
+    assert "invalid_ntp_server" in {item.code for item in invalid.diagnostics}
 
 
 def test_arista_unsupported_syntax_stays_unresolved():

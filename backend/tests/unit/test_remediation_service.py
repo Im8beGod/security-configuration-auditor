@@ -137,3 +137,39 @@ def test_framework_preview_enforces_failed_threshold_and_returns_canonical_param
             {"minutes": "6"},
             policy_parameters={"maximum_admin_idle_timeout_seconds": 300},
         )
+
+
+def test_arista_ntp_procedures_are_exact_rule_bound_and_validate_server_parameters():
+    for rule_id in ("time.ntp.server.configured", "time.ntp.configured"):
+        db, finding, _audit = _catalog_context(rule_id, "arista.eos.4@1.0.0")
+        selected, reason, source = _select(db, finding, _audit)
+        assert selected is not None and reason is None and source == "built_in_reviewed_catalog"
+        assert selected.rule_id == rule_id
+        preview = preview_remediation(
+            db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id,
+            {"server": "Time-01.example.invalid"},
+        )
+        assert preview["validated_parameters"] == {"server": "time-01.example.invalid"}
+        assert "ntp server time-01.example.invalid" in preview["rendered_steps"]
+        with pytest.raises(RemediationError):
+            preview_remediation(
+                db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id,
+                {"server": "unsafe value"},
+            )
+
+
+def test_failed_rules_without_reviewed_procedures_are_explicitly_unavailable():
+    db, finding, audit = _catalog_context(
+        "management.source.restriction.configured", "arista.eos.4@1.0.0"
+    )
+    response = preview_remediation(
+        db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id, {}
+    )
+    assert response == {
+        "status": "unavailable", "reason": "no_published_procedure",
+        "finding_id": finding.finding_id,
+    }
+    finding.verdict = "unknown"
+    assert preview_remediation(
+        db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id, {}
+    )["status"] == "not_required"

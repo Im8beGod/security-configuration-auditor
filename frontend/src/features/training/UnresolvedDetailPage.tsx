@@ -85,6 +85,27 @@ function starterJsonDefinition(field: CanonicalField, profileVersion: string, bl
   }
 }
 
+function defaultStructuredType(field: CanonicalField): string {
+  return field.expected_types.find((item) => ['boolean', 'integer', 'number', 'string', 'enum', 'ip_address', 'ip_network', 'duration'].includes(item)) ?? 'string'
+}
+
+function structuredDefinition(field: CanonicalField, profileVersion: string, xml: boolean, pathText: string, source: string, outputType: string, scope: string, attribute: string): MappingDefinition {
+  const path = pathText.split('/').map((item) => item.trim()).filter(Boolean)
+  const captureType = outputType === 'duration' ? 'integer' : ['enum', 'ip_network'].includes(outputType) ? 'string' : outputType
+  const presence = source === 'presence'
+  const structuralMatch = xml
+    ? { operation: 'xml_path', command: 'xml', xml_path: { path: path.map((local_name) => ({ local_name, occurrence: 'exact' })), source, ...(source === 'attribute' ? { attribute } : {}), ...(presence ? { value_type: 'boolean' } : { capture: 'value', value_type: captureType }), start_mode: 'document_root' } }
+    : { operation: 'json_path', command: 'json', json_path: { path: path.map((item) => /^\d+$/.test(item) ? { index: Number(item) } : { key: item }), source, ...(presence ? { value_type: 'boolean' } : { capture: 'value', value_type: captureType }) } }
+  const type = presence ? 'boolean' : outputType
+  return {
+    profile_applicability: { profile_version_ids: [profileVersion] }, structural_match: structuralMatch,
+    target_field_id: field.field_id,
+    value_extraction: presence ? { operation: 'boolean_from_presence', output_type: 'boolean' } : { operation: ['integer', 'number'].includes(type) ? type : 'capture', capture: 'value', output_type: type },
+    unit_conversion: { operation: type === 'duration' ? 'minutes_to_seconds' : 'none' }, scope_resolution: { strategy: scope },
+    negation_behavior: { operation: 'unsupported' }, removal_behavior: { operation: 'unsupported' }, default_behavior: { operation: 'unknown' }, examples: [],
+  }
+}
+
 function MappingEditor({ block, fields, existing, onSaved }: { block: UnresolvedBlock; fields: CanonicalField[]; existing?: MappingVersion; onSaved: (mapping: MappingVersion) => void }) {
   const initialField = fields.find((field) => field.field_id === existing?.target_field_id) ?? fields.find((field) => block.candidate_field_ids.includes(field.field_id)) ?? fields[0]
   const existingMatch = existing?.structural_match
@@ -95,16 +116,26 @@ function MappingEditor({ block, fields, existing, onSaved }: { block: Unresolved
   const [mappingKey, setMappingKey] = useState(existing?.mapping_key ?? `${block.profile_version_id?.startsWith('juniper.') ? 'junos' : 'mapping'}.${block.fingerprint.slice(0, 12)}`)
   const [title, setTitle] = useState(existing?.title ?? 'Reviewed unresolved syntax')
   const [description, setDescription] = useState(existing?.description ?? 'Administrator-authored bounded mapping for reviewed syntax.')
-  const isXml = existing?.structural_match?.operation === 'xml_path' || block.profile_version_id?.startsWith('juniper.') || block.profile_version_id?.startsWith('generic.xml')
-  const isJson = existing?.structural_match?.operation === 'json_path' || block.profile_version_id?.startsWith('generic.json')
+  const isXml = Boolean(existing?.structural_match?.operation === 'xml_path' || block.profile_version_id?.startsWith('juniper.') || block.profile_version_id?.startsWith('generic.xml'))
+  const isJson = Boolean(existing?.structural_match?.operation === 'json_path' || block.profile_version_id?.startsWith('generic.json'))
   const structured = isXml || isJson
   const [advancedJson, setAdvancedJson] = useState(existing ? JSON.stringify(mappingDefinition(existing), null, 2) : isXml ? JSON.stringify(starterXmlDefinition(initialField, block.profile_version_id ?? 'generic.xml@1.0.0', block), null, 2) : isJson ? JSON.stringify(starterJsonDefinition(initialField, block.profile_version_id ?? 'generic.json@1.0.0', block), null, 2) : '')
+  const existingPath = isXml ? ((existingMatch?.xml_path as { path?: Array<{ local_name?: string }> } | undefined)?.path ?? []).map((item) => item.local_name ?? '').filter(Boolean).join('/') : ((existingMatch?.json_path as { path?: Array<{ key?: string; index?: number }> } | undefined)?.path ?? []).map((item) => item.key ?? String(item.index ?? '')).filter(Boolean).join('/')
+  const blockPath = isXml ? (Array.isArray(block.occurrence.xml_path) ? block.occurrence.xml_path.map((item) => String(item).replace(/^.*}/, '').replace(/\[\d+\]$/, '')).join('/') : '') : (Array.isArray(block.occurrence.json_path) ? block.occurrence.json_path.map(String).join('/') : '')
+  const [pathText, setPathText] = useState(existingPath || blockPath)
+  const [source, setSource] = useState(String((isXml ? (existingMatch?.xml_path as { source?: string } | undefined)?.source : (existingMatch?.json_path as { source?: string } | undefined)?.source) ?? (isXml ? 'text' : 'value')))
+  const [outputType, setOutputType] = useState(String(existing?.value_extraction.output_type ?? defaultStructuredType(initialField)))
+  const [scope, setScope] = useState(String(existing?.scope_resolution.strategy ?? (initialField.allowed_scope_types.includes('device') ? 'device' : 'global')))
+  const [attribute, setAttribute] = useState(String((existingMatch?.xml_path as { attribute?: string } | undefined)?.attribute ?? ''))
+  const [expertMode, setExpertMode] = useState(false)
   const [advancedError, setAdvancedError] = useState<string | null>(null)
   const mutation = useMutation({
     mutationFn: () => {
       const field = fields.find((item) => item.field_id === fieldId) ?? initialField
       let definition: MappingDefinition
-      if (existing || structured) {
+      if (structured && !expertMode) {
+        definition = structuredDefinition(field, block.profile_version_id ?? (isXml ? 'generic.xml@1.0.0' : 'generic.json@1.0.0'), isXml, pathText, source, outputType, scope, attribute)
+      } else if (existing || structured) {
         try {
           definition = JSON.parse(advancedJson) as MappingDefinition
           setAdvancedError(null)
@@ -119,7 +150,8 @@ function MappingEditor({ block, fields, existing, onSaved }: { block: Unresolved
     },
     onSuccess: onSaved,
   })
-  return <form className="panel mapping-editor" onSubmit={(event) => { event.preventDefault(); mutation.mutate() }}><div className="section-title"><div><span className="eyebrow">Bounded declarative controls</span><h2>{existing ? 'Edit draft Mapping' : 'Create Mapping manually'}</h2></div></div><p className="quiet-state">No code, regex, shell, or executable expressions are accepted. The server validates every operation and canonical field.</p><div className="form-grid"><label className="field">Mapping key<input required maxLength={255} value={mappingKey} disabled={Boolean(existing)} onChange={(event) => setMappingKey(event.target.value)} /></label><label className="field">Canonical target field<select value={fieldId} onChange={(event) => setFieldId(event.target.value)}>{fields.map((field) => <option key={field.field_id} value={field.field_id}>{field.field_id}</option>)}</select></label><label className="field">Title<input required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} /></label>{existing || isXml ? <label className="field span-two">Full MappingDefinition JSON <small>lossless bounded XML-path editor; server remains authoritative</small><textarea required rows={18} value={advancedJson} onChange={(event) => setAdvancedJson(event.target.value)} /></label> : <><label className="field">Command equality<input required maxLength={100} value={command} onChange={(event) => setCommand(event.target.value)} /></label><label className="field">Parent command <small>optional</small><input maxLength={100} value={parent} onChange={(event) => setParent(event.target.value)} /></label><label className="field">Leading literal arguments <small>space separated</small><input value={literals} onChange={(event) => setLiterals(event.target.value)} /></label></>}<label className="field span-two">Description<textarea required maxLength={2048} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} /></label></div>{advancedError && <p className="error-message" role="alert">{advancedError}</p>}{mutation.isError && <p className="error-message" role="alert">{errorMessage(mutation.error)}</p>}<div className="button-row"><button className="button-primary" disabled={mutation.isPending}>{mutation.isPending ? 'Saving...' : existing ? 'Save revised draft' : 'Create draft Mapping'}</button></div></form>
+  const selectedField = fields.find((field) => field.field_id === fieldId) ?? initialField
+  return <form className="panel mapping-editor" onSubmit={(event) => { event.preventDefault(); mutation.mutate() }}><div className="section-title"><div><span className="eyebrow">Bounded declarative controls</span><h2>{existing ? 'Edit draft Mapping' : 'Create Mapping manually'}</h2></div></div><p className="quiet-state">No code, regex, shell, or executable expressions are accepted. The server validates every operation and canonical field.</p><div className="form-grid"><label className="field">Mapping key<input required maxLength={255} value={mappingKey} disabled={Boolean(existing)} onChange={(event) => setMappingKey(event.target.value)} /></label><label className="field">Canonical target field<select value={fieldId} onChange={(event) => { const next = fields.find((field) => field.field_id === event.target.value) ?? initialField; setFieldId(next.field_id); setOutputType(defaultStructuredType(next)); setScope(next.allowed_scope_types.includes('device') ? 'device' : 'global') }}>{fields.map((field) => <option key={field.field_id} value={field.field_id}>{field.field_id}</option>)}</select></label><label className="field">Title<input required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} /></label>{structured ? <><label className="field span-two">{isXml ? 'XML element path' : 'JSON key/index path'}<input required placeholder="system/services/ssh" value={pathText} onChange={(event) => setPathText(event.target.value)} /></label><label className="field">Source<select value={source} onChange={(event) => { setSource(event.target.value); if (event.target.value === 'presence') setOutputType('boolean') }}><option value="presence">presence</option>{isXml && <option value="text">text</option>}{isXml && <option value="attribute">attribute</option>}{isJson && <option value="value">value</option>}</select></label>{isXml && source === 'attribute' && <label className="field">Attribute<input required value={attribute} onChange={(event) => setAttribute(event.target.value)} /></label>}<label className="field">Value type / transform<select value={outputType} disabled={source === 'presence'} onChange={(event) => setOutputType(event.target.value)}>{selectedField.expected_types.map((type) => <option key={type} value={type}>{type === 'duration' ? 'duration (minutes to seconds)' : type}</option>)}</select></label><label className="field">Scope<select value={scope} onChange={(event) => setScope(event.target.value)}>{selectedField.allowed_scope_types.filter((item) => item === 'device' || item === 'global').map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="field span-two"><input type="checkbox" checked={expertMode} onChange={(event) => setExpertMode(event.target.checked)} /> Expert JSON mode</label>{expertMode && <label className="field span-two">Full MappingDefinition JSON <textarea required rows={18} value={advancedJson} onChange={(event) => setAdvancedJson(event.target.value)} /></label>}</> : existing ? <label className="field span-two">Full MappingDefinition JSON <textarea required rows={18} value={advancedJson} onChange={(event) => setAdvancedJson(event.target.value)} /></label> : <><label className="field">Command equality<input required maxLength={100} value={command} onChange={(event) => setCommand(event.target.value)} /></label><label className="field">Parent command <small>optional</small><input maxLength={100} value={parent} onChange={(event) => setParent(event.target.value)} /></label><label className="field">Leading literal arguments <small>space separated</small><input value={literals} onChange={(event) => setLiterals(event.target.value)} /></label></>}<label className="field span-two">Description<textarea required maxLength={2048} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} /></label></div>{advancedError && <p className="error-message" role="alert">{advancedError}</p>}{mutation.isError && <p className="error-message" role="alert">{errorMessage(mutation.error)}</p>}<div className="button-row"><button className="button-primary" disabled={mutation.isPending}>{mutation.isPending ? 'Saving...' : existing ? 'Save revised draft' : 'Create draft Mapping'}</button></div></form>
 }
 
 function MappingWorkflow({ block, mappingId, fields }: { block: UnresolvedBlock; mappingId: string; fields: CanonicalField[] }) {

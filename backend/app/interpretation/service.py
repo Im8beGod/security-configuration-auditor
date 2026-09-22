@@ -68,7 +68,7 @@ from app.knowledge_packs.juniper_junos_18 import (
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
     JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1,
 )
-from app.knowledge_packs.arista_eos_4 import ARISTA_EOS_4_KNOWLEDGE_PACK
+from app.knowledge_packs.arista_eos_4 import ARISTA_EOS_4_KNOWLEDGE_PACK, ARISTA_EOS_4_KNOWLEDGE_PACK_V1
 from app.knowledge_packs.generic_cli import GENERIC_CLI_KNOWLEDGE_PACK, GENERIC_JSON_KNOWLEDGE_PACK, GENERIC_XML_KNOWLEDGE_PACK
 from app.parsing import ConfigNode, ConfigNodeKind, ParseStatus, StructuralIR, parse_artifact
 from app.parsing.readers.xml_tree import XmlStructuralIR, XmlNode
@@ -104,6 +104,7 @@ KNOWLEDGE_PACK_REGISTRY = KnowledgePackRegistry(
         JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1,
         JUNIPER_JUNOS_18_KNOWLEDGE_PACK_V1_1,
         JUNIPER_JUNOS_18_KNOWLEDGE_PACK,
+        ARISTA_EOS_4_KNOWLEDGE_PACK_V1,
         ARISTA_EOS_4_KNOWLEDGE_PACK,
         GENERIC_CLI_KNOWLEDGE_PACK,
         GENERIC_XML_KNOWLEDGE_PACK,

@@ -90,6 +90,7 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "management.remote.telnet.enabled",
         "management.remote.ssh.enabled",
         "management.remote.ssh.version",
+        "management.remote.http.enabled",
         "management.remote.source.restriction.configured",
         "management.session.idle_timeout",
         "logging.enabled",
@@ -104,6 +105,7 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
         "transport input telnet|ssh|telnet ssh|ssh telnet|none",
         "exec-timeout <minutes> [seconds]",
         "ip ssh version 1|2",
+        "ip http server|no ip http server",
         "logging host <ip-or-hostname>",
         "ntp server <ip-or-hostname>",
         "access-class <name> in (within line vty)",
@@ -112,7 +114,7 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
     )
     assert "no documented defaults, inheritance, references, or bindings" in coverage["limitations"]
     assert CISCO_IOS_XE_17.structural_reader_name == "indentation_cli.v1"
-    assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.2.0"
+    assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.3.0"
 
 
 def test_explicit_ios_xe_17_version_selects_stable_supported_profile():

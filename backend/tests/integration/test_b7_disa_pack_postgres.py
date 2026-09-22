@@ -71,13 +71,19 @@ def test_b7_disa_pack_is_immutable_pinned_and_evaluates_shared_states_for_three_
                 coverage = persist_assessment_results(db, audit_id=audit.audit_id, organization_id=organization_id, profile_version_id=profile, findings=[])
                 assert pinned is not None and pinned.assessment_pack_version_id == disa.assessment_pack_version_id
                 assert coverage["manual"] == 2
-                assert coverage["automatic_verdicts"] == ({"pass": 6, "fail": 0, "unknown": 0} if profile == PROFILES[0] else {"pass": 5, "fail": 0, "unknown": 1})
+                expected = {
+                    PROFILES[0]: (6, 0),
+                    PROFILES[1]: (5, 1),
+                    PROFILES[2]: (4, 2),
+                }[profile]
+                assert coverage["automatic_verdicts"] == {"pass": expected[0], "fail": 0, "unknown": 0}
+                assert coverage["not_applicable"] == expected[1]
                 results = {item.result_identity.split(":", 1)[0]: item for item in db.scalars(select(AssessmentResult).where(AssessmentResult.audit_id == audit.audit_id))}
                 assert results["v-213467.remote-log-destination"].verdict == "pass"
                 assert results["v-264308.ntp-server"].verdict == "pass"
                 assert results["v-202118.remote-session-crypto-review"].verdict is None
                 if profile != PROFILES[0]:
-                    assert results["v-202112.ntp-authentication"].verdict == "unknown"
+                    assert results["v-202112.ntp-authentication"].verdict is None
     finally:
         if organization_id is not None:
             with factory.begin() as db:

@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from app.interpretation.knowledge_pack import KnowledgePack
-from app.knowledge_packs.cisco_iosxe_17.mappings import B4_MAPPINGS, MAPPINGS
+from app.knowledge_packs.cisco_iosxe_17.mappings import B4_MAPPINGS, MAPPINGS, PHASE8_MAPPINGS
 
 CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1 = KnowledgePack(
     knowledge_pack_id=UUID("33ededa8-0c17-55e0-b104-302fc55de5b8"),
@@ -12,7 +12,7 @@ CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_1 = KnowledgePack(
 )
 
 
-CISCO_IOS_XE_17_KNOWLEDGE_PACK = KnowledgePack(
+CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_2 = KnowledgePack(
     knowledge_pack_id=UUID("33ededa8-0c17-55e0-b104-302fc55de5b8"),
     knowledge_pack_version_id=UUID("cac42149-9da9-5d13-94d7-12d2c9ae5b05"),
     name="cisco_iosxe_17",
@@ -21,4 +21,16 @@ CISCO_IOS_XE_17_KNOWLEDGE_PACK = KnowledgePack(
     profile_id="cisco.ios_xe.17",
     profile_version_id="cisco.ios_xe.17@1.0.0",
     mappings=MAPPINGS,
+)
+
+
+CISCO_IOS_XE_17_KNOWLEDGE_PACK = KnowledgePack(
+    knowledge_pack_id=UUID("33ededa8-0c17-55e0-b104-302fc55de5b8"),
+    knowledge_pack_version_id=UUID("f5bb890c-c8c3-5628-9047-3e0b95871a13"),
+    name="cisco_iosxe_17",
+    version="1.3.0",
+    schema_version="1.0.0",
+    profile_id="cisco.ios_xe.17",
+    profile_version_id="cisco.ios_xe.17@1.0.0",
+    mappings=PHASE8_MAPPINGS,
 )

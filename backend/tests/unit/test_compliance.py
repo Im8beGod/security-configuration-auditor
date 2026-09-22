@@ -130,7 +130,8 @@ def test_framework_reference_validation_rejects_duplicates_and_wrong_titles():
         RuleRegistry((replace(RULE_PACK, rules=(wrong_title, *RULE_PACK.rules[1:])),))
 
 
-def test_unknown_verdict_is_independent_of_nist_reference():
+@pytest.mark.parametrize("rule_id", ("management.ssh.enabled", "management.http.disabled"))
+def test_missing_management_evidence_is_unknown_not_a_pass(rule_id):
     from app.compliance.service import evaluate_audit_compliance
 
     audit = SimpleNamespace(
@@ -142,7 +143,7 @@ def test_unknown_verdict_is_independent_of_nist_reference():
         db, audit_id=audit.audit_id, organization_id=UUID(int=12), rule_pack=RULE_PACK,
         organization_policy=None, effective_states=(),
     )
-    unknown = next(item for item in drafts if item.rule_id == "management.ssh.enabled")
+    unknown = next(item for item in drafts if item.rule_id == rule_id)
     assert unknown.verdict is FindingVerdict.UNKNOWN
     assert unknown.framework_references[0]["control_id"] == "AC-17"
 

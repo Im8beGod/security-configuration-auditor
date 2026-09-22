@@ -92,7 +92,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
                     (
                         "primary.cfg",
                         b"ip ssh version 2\nlogging host 192.0.2.10\n"
-                        b"line vty 0 4\n exec-timeout 10 0\n transport input telnet ssh\n",
+                        b"no ip http server\nline vty 0 4\n exec-timeout 10 0\n transport input telnet ssh\n",
                     ),
                     (
                         "secondary.cfg",
@@ -150,7 +150,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
         with factory() as db:
             first = interpret_audit(db, storage, audit_id, first_org)
             first_ids = {fact.fact_id for fact in first.facts}
-            assert len(first.facts) == 8
+            assert len(first.facts) == 9
             assert len(first.artifact_results) == 2
 
         with factory() as db:
@@ -158,7 +158,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
             assert {fact.fact_id for fact in second.facts} == first_ids
             assert db.scalar(select(func.count()).select_from(SecurityFact).where(
                 SecurityFact.audit_id == audit_id
-            )) == 8
+            )) == 9
             unresolved_count = db.scalar(select(func.count()).select_from(UnresolvedBlock).where(UnresolvedBlock.audit_id == audit_id))
             assert unresolved_count and unresolved_count > 0
             persisted = list_audit_security_facts(db, audit_id, first_org)
@@ -167,6 +167,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
                 "management.remote.telnet.enabled",
                 "management.remote.ssh.enabled",
                 "management.remote.ssh.version",
+                "management.remote.http.enabled",
                 "management.session.idle_timeout",
                     "logging.remote.destination",
                     "time.ntp.server",
@@ -181,6 +182,8 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
                        for fact in persisted for ref in fact.evidence_refs)
             assert all("artifacts" not in ref["source_path"]
                        for fact in persisted for ref in fact.evidence_refs)
+            http = next(item for item in persisted if item.field_id == "management.remote.http.enabled")
+            assert http.value["value"] is False
             audit_row = db.get(Audit, audit_id)
             assert audit_row.status == AuditStatus.QUEUED
             assert audit_row.processing_stage is None

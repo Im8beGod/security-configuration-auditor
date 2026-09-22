@@ -158,6 +158,24 @@ def test_arista_ntp_procedures_are_exact_rule_bound_and_validate_server_paramete
             )
 
 
+@pytest.mark.parametrize(("profile", "rule_id", "parameters", "command"), [
+    ("cisco.ios_xe.17@1.0.0", "management.ssh.enabled", {"vty_range": "0 4"}, "transport input ssh"),
+    ("cisco.ios_xe.17@1.0.0", "management.http.disabled", {}, "no ip http server"),
+    ("fortinet.fortios.7@1.0.0", "management.ssh.enabled", {"interface": "port1", "protocols": "https ssh"}, "set allowaccess https ssh"),
+    ("juniper.junos.18@1.0.0", "management.ssh.enabled", {}, "set system services ssh"),
+])
+def test_stage7_supported_failures_have_profile_bound_rendered_remediation(profile, rule_id, parameters, command):
+    db, finding, audit = _catalog_context(rule_id, profile)
+    selected, reason, source = _select(db, finding, audit)
+    assert selected is not None and reason is None and source == "built_in_reviewed_catalog"
+    preview = preview_remediation(db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id, parameters)
+    assert command in preview["rendered_steps"]
+
+    if rule_id == "management.http.disabled":
+        other_db, other_finding, other_audit = _catalog_context(rule_id, "arista.eos.4@1.0.0")
+        assert _select(other_db, other_finding, other_audit)[1] == "unsupported_profile"
+
+
 def test_failed_rules_without_reviewed_procedures_are_explicitly_unavailable():
     db, finding, audit = _catalog_context(
         "management.source.restriction.configured", "arista.eos.4@1.0.0"

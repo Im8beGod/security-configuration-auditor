@@ -87,14 +87,20 @@ def test_b6_nist_pack_is_pinned_and_evaluates_shared_canonical_states_for_three_
                 coverage = persist_assessment_results(db, audit_id=audit.audit_id, organization_id=organization_id, profile_version_id=profile, findings=[])
                 assert pinned is not None and pinned.assessment_pack_version_id == pack.assessment_pack_version_id
                 assert coverage["selected_obligation_count"] == 10
-                assert coverage["automatic_verdicts"] == {"pass": 4, "fail": 0, "unknown": 4}
+                unsupported = {
+                    "cisco.ios_xe.17@1.0.0": (4, 0),
+                    "fortinet.fortios.7@1.0.0": (3, 1),
+                    "juniper.junos.18@1.0.0": (1, 3),
+                }[profile]
+                assert coverage["automatic_verdicts"] == {"pass": 4, "fail": 0, "unknown": unsupported[0]}
+                assert coverage["not_applicable"] == unsupported[1]
                 assert coverage["manual"] == 2
                 results = {item.result_identity.split(":", 1)[0]: item for item in db.scalars(select(AssessmentResult).where(AssessmentResult.audit_id == audit.audit_id))}
                 assert results["ac-17.remote-ssh-enabled"].verdict == "pass"
                 assert results["au-12.remote-logging"].verdict == "pass"
                 assert results["au-8.ntp-server"].verdict == "pass"
                 assert results["au-8.ntp-server"].result_details["effective_state"]["field_id"] == "time.ntp.server"
-                assert results["ac-17.telnet-disabled"].verdict == "unknown"
+                assert results["ac-17.telnet-disabled"].verdict == ("unknown" if profile != PROFILES[2] else None)
                 assert results["ac-17.authorization-review"].verdict is None
                 if profile == PROFILES[0]:
                     extra_scope = _state(audit.audit_id, device.device_id, "management.remote.ssh.enabled", {"type": "boolean", "value": True})

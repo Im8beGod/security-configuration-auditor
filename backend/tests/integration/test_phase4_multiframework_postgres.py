@@ -47,5 +47,19 @@ def test_all_frameworks_pin_and_never_invent_pass_without_evidence():
             assert rows and all(result.verdict in {None, "unknown"} for result, _obligation in rows)
             assert all(obligation.source_url.startswith("https://") and obligation.control_id for _result, obligation in rows)
             assert all(pack.family != "CIS Benchmark" for pack in compatible_packs(db, organization_id, "fortinet.fortios.7@1.0.0"))
+
+            arista = Device(organization_id=organization_id, display_name="P4 Arista")
+            db.add(arista); db.flush()
+            arista_snapshot = Snapshot(organization_id=organization_id, device_id=arista.device_id, status=SnapshotStatus.LOCKED, grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED, snapshot_hash="b" * 64, artifact_count=0, source=SnapshotSource.UPLOAD, created_by=user_id)
+            db.add(arista_snapshot); db.flush()
+            arista_audit = Audit(organization_id=organization_id, device_id=arista.device_id, snapshot_id=arista_snapshot.snapshot_id, revision_number=1, reevaluation_reason=AuditReevaluationReason.INITIAL, status=AuditStatus.PROCESSING, selected_frameworks=["nist"], version_refs={}, profile_resolution={"resolution_status": "resolved", "profile_version_id": "arista.eos.4@1.0.0"}, verdict_counts={}, severity_counts={}, coverage={}, created_by=user_id)
+            db.add(arista_audit); db.flush()
+            pin_assessment(db, arista_audit, "arista.eos.4@1.0.0")
+            arista_coverage = persist_assessment_results(db, audit_id=arista_audit.audit_id, organization_id=organization_id, profile_version_id="arista.eos.4@1.0.0", findings=[])
+            arista_rows = {obligation.obligation_key: result for result, obligation in db.execute(select(AssessmentResult, AssessmentObligation).join(AssessmentObligation).where(AssessmentResult.audit_id == arista_audit.audit_id)).all()}
+            assert arista_rows["ac-17.ssh-v2"].applicability_status == "not_applicable"
+            assert arista_rows["ac-17.ssh-v2"].result_details["not_applicable_reason"] == "canonical_evidence_unsupported"
+            assert arista_rows["ac-17.remote-ssh-enabled"].verdict == "unknown"
+            assert arista_coverage["not_applicable"] > 0
     finally:
         outer.rollback(); connection.close(); engine.dispose()

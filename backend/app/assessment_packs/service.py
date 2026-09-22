@@ -26,6 +26,7 @@ from app.db.models import (
     SecurityFact,
 )
 from app.effective_state.contracts import ResolutionStatus, UnresolvedReason
+from app.profile_resolution import PROFILE_REGISTRY
 
 
 class AssessmentPackError(ValueError):
@@ -211,6 +212,21 @@ def _rule_for(rule_id: str, profile_version_id: str) -> RuleDefinition:
     raise AssessmentPackError("assessment_evaluator_unavailable", "Assessment evaluator binding is unavailable")
 
 
+def _automatic_evidence_supported(obligation: AssessmentObligationRow, profile_version_id: str) -> bool:
+    """Only assess automatic obligations against facts sealed for this profile."""
+    profile = PROFILE_REGISTRY.get(profile_version_id)
+    required = (obligation.policy_parameters or {}).get("required_canonical_fields", [])
+    if not isinstance(required, list) or not required:
+        try:
+            required = list(_rule_for(obligation.evaluator_rule_id or "", profile_version_id).required_effective_states)
+        except AssessmentPackError:
+            return False
+    if profile is None or not required:
+        return False
+    supported = set(profile.coverage_manifest.get("canonical_fields", ()))
+    return all(isinstance(field, str) and field in supported for field in required)
+
+
 def _result_identity(obligation: AssessmentObligationRow) -> tuple[str, str]:
     digest = policy_digest(obligation.policy_parameters or {})
     return f"{obligation.obligation_key}:{digest}", digest
@@ -284,6 +300,14 @@ def persist_assessment_results(
             "scope": obligation.scope, "source_url": obligation.source_url,
             "source_digest": obligation.source_digest,
         }
+        if (
+            applicability is ApplicabilityStatus.APPLICABLE
+            and obligation.implementation_status == ImplementationStatus.IMPLEMENTED.value
+            and obligation.assessment_method == AssessmentMethod.AUTOMATIC.value
+            and not _automatic_evidence_supported(obligation, profile_version_id)
+        ):
+            applicability = ApplicabilityStatus.NOT_APPLICABLE
+            details["not_applicable_reason"] = "canonical_evidence_unsupported"
         if applicability is ApplicabilityStatus.APPLICABLE and obligation.implementation_status == ImplementationStatus.IMPLEMENTED.value and obligation.assessment_method == AssessmentMethod.AUTOMATIC.value:
             rule = _rule_for(obligation.evaluator_rule_id or "", profile_version_id)
             field_states = [state for state in states if state.field_id in rule.required_effective_states]

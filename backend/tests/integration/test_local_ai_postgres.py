@@ -122,7 +122,11 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
             artifact_id = uuid4()
             reference = storage.write(content, organization_id=organization_id, artifact_id=artifact_id)
             artifact = Artifact(artifact_id=artifact_id, organization_id=organization_id, snapshot_id=snapshot.snapshot_id, original_filename="b4-development.xml", storage_reference=reference, byte_size=len(content), sha256=sha256(content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.XML, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY)
-            db.add(artifact); db.flush()
+            negative_content = b"<configuration><system><services/></system></configuration>"
+            negative_artifact_id = uuid4()
+            negative_reference = storage.write(negative_content, organization_id=organization_id, artifact_id=negative_artifact_id)
+            negative_artifact = Artifact(artifact_id=negative_artifact_id, organization_id=organization_id, snapshot_id=snapshot.snapshot_id, original_filename="b4-negative.xml", storage_reference=negative_reference, byte_size=len(negative_content), sha256=sha256(negative_content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.XML, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY)
+            db.add_all([artifact, negative_artifact]); db.flush()
             block = UnresolvedBlock(organization_id=organization_id, audit_id=audit.audit_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, profile_id="juniper.junos.18", profile_version_id="juniper.junos.18@1.0.0", source_ir_node_ids=["node-1"], evidence_refs=[{"artifact_id": str(artifact_id)}], raw_text="<ssh/>", surrounding_context=content.decode(), unknown_reason="unmapped_syntax", candidate_field_ids=["management.remote.ssh.enabled"], affected_rule_ids=["rule.unknown"], fingerprint=sha256(f"{audit.audit_id}:node-1".encode()).hexdigest(), occurrence={"xml_path": ["configuration[1]", "system[1]", "services[1]", "ssh[1]"]})
             db.add(block)
             finding = Finding(finding_id=uuid4(), audit_id=audit.audit_id, device_id=device.device_id, comparison_key="unknown", rule_id="rule.unknown", rule_pack_version_id=uuid4(), title="Unknown", security_domain="management", verdict=FindingVerdict.UNKNOWN, severity=FindingSeverity.MEDIUM, expected_state={}, observed_state=None, explanation="Persisted unknown", affected_scope=None, effective_state_refs=[], evidence_refs=[], unknown_reason="missing_evidence", framework_references=[], remediation_procedure_id=None)
@@ -169,7 +173,7 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
                 mapping_id = UUID(adopted.json()["mapping_version_id"])
                 assert client.post(f"/api/v1/training/mappings/{mapping_id}/approve").status_code == 409
                 assert client.post(f"/api/v1/training/mappings/{mapping_id}/publish").status_code == 409
-                queued = client.post(f"/api/v1/training/mappings/{mapping_id}/validate", json={"evidence_artifact_id": str(artifact_id)})
+                queued = client.post(f"/api/v1/training/mappings/{mapping_id}/validate", json={"evidence_artifact_id": str(artifact_id), "negative_evidence_artifact_id": str(negative_artifact_id)})
                 assert queued.status_code == 202, queued.text
                 run_id = UUID(queued.json()["validation_run_id"])
                 result = execute_validation(db, run_id, mapping_id, organization_id)

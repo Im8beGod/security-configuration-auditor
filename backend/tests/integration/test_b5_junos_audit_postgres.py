@@ -113,7 +113,7 @@ def test_b5_junos_audit_persists_scoped_semantics_through_normal_workflow(tmp_pa
             persisted = db.get(Audit, audit_id)
             assert persisted is not None and persisted.processing_stage.value == "resolving_state"
             assert persisted.profile_resolution["profile_version_id"] == "juniper.junos.18@1.0.0"
-            assert persisted.version_refs["knowledge_pack_version_id"] == "b3050000-0000-5000-8000-000000000018"
+            assert persisted.version_refs["knowledge_pack_version_id"] == "b3060000-0000-5000-8000-000000000018"
             facts = list(db.scalars(select(SecurityFact).where(SecurityFact.audit_id == audit_id)))
             by_field = {}
             for fact in facts:

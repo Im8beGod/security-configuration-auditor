@@ -14,7 +14,11 @@ from app.assessment_packs.contracts import (
     coverage_summary,
     policy_digest,
 )
-from app.assessment_packs.service import AssessmentPackError, AssessmentPackRegistry
+from app.assessment_packs.service import (
+    AssessmentPackError,
+    AssessmentPackRegistry,
+    _automatic_evidence_supported,
+)
 
 
 def test_assessment_pack_and_obligation_contracts_are_immutable_and_test_scoped():
@@ -52,6 +56,17 @@ def test_coverage_keeps_manual_unimplemented_and_automatic_verdicts_separate():
 
 def test_policy_digest_distinguishes_same_rule_with_different_parameters():
     assert policy_digest({"expected": True}) != policy_digest({"expected": False})
+
+
+@pytest.mark.parametrize(("profile", "field", "expected"), [
+    ("cisco.ios_xe.17@1.0.0", "management.remote.ssh.version", True),
+    ("fortinet.fortios.7@1.0.0", "management.remote.ssh.version", False),
+    ("juniper.junos.18@1.0.0", "logging.remote.destination", True),
+    ("arista.eos.4@1.0.0", "logging.enabled", False),
+])
+def test_automatic_obligations_require_profile_supported_canonical_evidence(profile, field, expected):
+    obligation = SimpleNamespace(policy_parameters={"required_canonical_fields": [field]})
+    assert _automatic_evidence_supported(obligation, profile) is expected
 
 
 def test_assessment_pack_registry_validates_persisted_version_identity():

@@ -21,7 +21,7 @@ from app.interpretation.knowledge_pack import (
 from app.interpretation.scopes import SCOPE_RESOLVER_TYPES
 from app.interpretation.service import load_validated_knowledge_pack
 from app.interpretation.service import load_validated_knowledge_pack_by_version
-from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK
+from app.knowledge_packs.cisco_iosxe_17 import CISCO_IOS_XE_17_KNOWLEDGE_PACK, CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_2
 from app.knowledge_packs.fortios_7 import FORTIOS_7_KNOWLEDGE_PACK, FORTIOS_7_KNOWLEDGE_PACK_V1
 from app.security_model import (
     FIELD_REGISTRY,
@@ -102,7 +102,7 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
     assert pack.profile_id == "cisco.ios_xe.17"
     assert pack.profile_version_id == "cisco.ios_xe.17@1.0.0"
     assert pack.knowledge_pack_id == UUID("33ededa8-0c17-55e0-b104-302fc55de5b8")
-    assert pack.knowledge_pack_version_id == UUID("cac42149-9da9-5d13-94d7-12d2c9ae5b05")
+    assert pack.knowledge_pack_version_id == UUID("f5bb890c-c8c3-5628-9047-3e0b95871a13")
     assert [item.mapping_id for item in pack.mappings] == [
         UUID("c2a81d5b-9591-5ecd-beee-46beb57acced"),
         UUID("bc2cc368-40eb-53ed-896e-5efd779359d3"),
@@ -116,6 +116,7 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
         UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b504"),
         UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b505"),
         UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b506"),
+        UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b507"),
     ]
     assert [item.mapping_version_id for item in pack.mappings] == [
         UUID("4e5634f2-c0f2-529e-912f-e42139aed61e"),
@@ -130,6 +131,7 @@ def test_ios_xe_pack_loads_with_stable_compatible_identity():
         UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf504"),
         UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf505"),
         UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf506"),
+        UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf507"),
     ]
 
 
@@ -139,6 +141,9 @@ def test_immutable_knowledge_pack_versions_remain_independently_loadable():
     )
     current = load_validated_knowledge_pack_by_version(
         UUID("dbad6d61-97d6-5e42-a1aa-feb4e28e15b0")
+    )
+    cisco_previous = load_validated_knowledge_pack_by_version(
+        CISCO_IOS_XE_17_KNOWLEDGE_PACK_V1_2.knowledge_pack_version_id
     )
     fortios_legacy = load_validated_knowledge_pack_by_version(
         FORTIOS_7_KNOWLEDGE_PACK_V1.knowledge_pack_version_id
@@ -150,6 +155,7 @@ def test_immutable_knowledge_pack_versions_remain_independently_loadable():
     assert current.version == "1.1.0"
     assert legacy.mappings[0].mapping_version_id == current.mappings[0].mapping_version_id
     assert current.mappings[0].reset_mapping_version_id == UUID("e42c0eb2-1d5d-584a-b463-8ee80574a35c")
+    assert cisco_previous.version == "1.2.0"
     assert fortios_legacy.version == "1.0.0"
     assert fortios_current.version == "1.3.0"
     assert fortios_legacy.mappings[0].mapping_version_id != fortios_current.mappings[0].mapping_version_id

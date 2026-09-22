@@ -9,6 +9,9 @@ from app.db.models import (
     InterpretationConfidence,
     InterpretationMethod,
 )
+from app.compliance.evaluator import evaluate_condition
+from app.compliance.rule_registry import RULE_PACK
+from app.effective_state.resolver import resolve_security_facts
 from app.interpretation import InterpretationContext, interpret_structural_ir
 from app.interpretation.service import (
     _persist_unresolved_blocks,
@@ -157,6 +160,34 @@ def test_transport_variants_do_not_fabricate_absent_protocol_meaning():
     }
 
 
+def test_cisco_http_state_is_explicit_ordered_and_never_inferred():
+    _ir, enabled = _interpret("ip http server\n")
+    _ir, disabled = _interpret("no ip http server\n")
+    _ir, ordered = _interpret("ip http server\nno ip http server\n")
+    _ir, missing = _interpret("ip ssh version 2\n")
+
+    rule = next(item for item in RULE_PACK.rules if item.rule_id == "management.http.disabled")
+    assert [item.value.value for item in _facts(enabled, "management.remote.http.enabled")] == [True]
+    assert [item.value.value for item in _facts(disabled, "management.remote.http.enabled")] == [False]
+    assert [item.value.value for item in _facts(ordered, "management.remote.http.enabled")] == [True, False]
+    assert not _facts(missing, "management.remote.http.enabled")
+    assert evaluate_condition(rule, _facts(enabled, "management.remote.http.enabled")[0].value.to_dict()).value == "fail"
+    assert evaluate_condition(rule, _facts(disabled, "management.remote.http.enabled")[0].value.to_dict()).value == "pass"
+    assert all(item.evidence_refs[0].source_path == "semantic.cfg" for item in _facts(disabled, "management.remote.http.enabled"))
+    states = resolve_security_facts(
+        audit_id=AUDIT_ID,
+        device_id=DEVICE_ID,
+        facts=[SimpleNamespace(
+            fact_id=item.fact_id, audit_id=item.audit_id, device_id=item.device_id,
+            field_id=item.field_id, value=item.value.to_dict(), scope=item.scope.to_dict(),
+            evidence_refs=[reference.to_dict() for reference in item.evidence_refs],
+            dependencies=(), knowledge_pack_version_id=item.knowledge_pack_version_id,
+            mapping_version_id=item.mapping_version_id,
+        ) for item in _facts(ordered, "management.remote.http.enabled")],
+    )
+    assert states[0].effective_value.value is False
+
+
 def test_invalid_extractors_negation_and_unknown_nodes_produce_no_fabricated_facts():
     _ir, result = _interpret(
         "ip ssh version three\n"
@@ -273,7 +304,7 @@ def test_fact_identity_and_full_provenance_are_stable():
     assert fact.evidence_refs[0].start_line == fact.evidence_refs[0].end_line == 2
     assert fact.evidence_refs[0].source_path == "semantic.cfg"
     assert fact.mapping_id is not None and fact.mapping_version_id is not None
-    assert fact.knowledge_pack_version_id == UUID("cac42149-9da9-5d13-94d7-12d2c9ae5b05")
+    assert fact.knowledge_pack_version_id == UUID("f5bb890c-c8c3-5628-9047-3e0b95871a13")
     assert fact.state == FactState.EXPLICIT
     assert fact.extraction_method == InterpretationMethod.DECLARATIVE_MAPPING
     assert fact.validation_status == FactValidationStatus.VALIDATED

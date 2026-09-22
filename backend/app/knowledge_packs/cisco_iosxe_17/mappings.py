@@ -144,3 +144,20 @@ MAPPINGS = B4_MAPPINGS + (
         declared_value_types=frozenset({TypedValueType.BOOLEAN}),
     ),
 )
+
+
+# IOS XE HTTP state is only known when an explicit server statement is present.
+# The indentation reader represents `no ip http server` as the same bounded
+# command with negation, so one invertible mapping preserves source ordering.
+PHASE8_MAPPINGS = MAPPINGS + (
+    DeclarativeMapping(
+        mapping_id=UUID("876787ca-1d7f-5a4c-9f1a-01f934b4b507"),
+        mapping_version_id=UUID("4c84d96e-99b0-53c9-b7f3-8e3f9e5bf507"),
+        field_id="management.remote.http.enabled",
+        matcher=NodeMatcher(command="ip", arguments_prefix=("http", "server")),
+        extractor="presence_enabled",
+        scope_resolver="device",
+        declared_value_types=frozenset({TypedValueType.BOOLEAN}),
+        negation_behavior=NegationBehavior.INVERT_BOOLEAN,
+    ),
+)

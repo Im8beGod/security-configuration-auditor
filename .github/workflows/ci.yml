@@ -141,15 +141,15 @@ jobs:
       - name: Validate Docker Compose
         run: docker compose config --quiet
 
-  restart-reuse:
-    name: Compose Restart Reuse Acceptance
+  runtime-vendor-extensibility:
+    name: Runtime Vendor Extensibility Acceptance
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify persisted mapping reuse across service restart
+      - name: Verify persisted runtime vendor reuse across service restart
         run: bash scripts/verify-compose-restart-reuse.sh
 
       - name: Tear down acceptance services

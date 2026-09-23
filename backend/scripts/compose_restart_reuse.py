@@ -13,6 +13,9 @@ from sqlalchemy import func, select
 from app.audit.pipeline import AuditPipelineCoordinator
 from app.cli.bootstrap_admin import bootstrap_admin
 from app.compliance.verdicts import FindingVerdict
+from app.compliance.runtime_rules import publish_runtime_rule, runtime_rule_for
+from app.assessment_packs.catalog import parse_runtime_catalog, publish_runtime_catalog
+from app.assessment_packs.service import compatible_packs
 from app.core.config import get_settings
 from app.db.engine import create_database_engine
 from app.db.models import (
@@ -21,6 +24,7 @@ from app.db.models import (
     MappingVersion, Organization, SecurityFact, Snapshot,
     SnapshotGroupingStatus, SnapshotSource, SnapshotStatus, UnresolvedBlock,
     User,
+    AssessmentResult, AssessmentPackVersion, Report, ReportStatus,
 )
 from app.db.session import create_session_factory
 from app.ingestion.storage import get_artifact_storage
@@ -32,6 +36,8 @@ from app.training.dsl import MappingDefinition
 from app.training.service import (
     approve_mapping, create_mapping, publish_mapping, request_validation,
 )
+from app.profile_resolution.runtime import parse_runtime_profile, profile_for, publish_runtime_profile
+from app.reporting.service import create_report
 
 
 RUN_ID = os.environ.get("SIH_RESTART_REUSE_RUN_ID")
@@ -44,6 +50,7 @@ PROFILES = {
     "cli": "generic.cli@1.0.0",
     "json": "generic.json@1.0.0",
     "xml": "generic.xml@1.0.0",
+    "runtime": f"runtime.compose.{RUN_ID}@1.0.0",
 }
 PAYLOADS = {
     "cli": (b"nebula-ssh enable\n", b"hostname edge\n", ArtifactContentFamily.TEXT, ArtifactEvidenceType.CONFIGURATION),
@@ -59,6 +66,7 @@ PAYLOADS = {
         ArtifactContentFamily.XML,
         ArtifactEvidenceType.STRUCTURED_EXPORT,
     ),
+    "runtime": (b"! Fictitious NebulaOS version 1.0.0\nnebula-ssh enable\n", b"! Fictitious NebulaOS version 1.0.0\nhostname edge\n", ArtifactContentFamily.TEXT, ArtifactEvidenceType.CONFIGURATION),
 }
 
 
@@ -72,7 +80,7 @@ def definition(kind: str) -> MappingDefinition:
         "default_behavior": {"operation": "unknown"},
         "examples": [],
     }
-    if kind == "cli":
+    if kind in {"cli", "runtime"}:
         examples = []
         for family, command, scope, expected in (
             ("positive", "nebula-ssh", "device", True),
@@ -89,14 +97,18 @@ def definition(kind: str) -> MappingDefinition:
                 "expected_match": expected,
                 "expected_value": True if expected else None,
             })
-        return MappingDefinition.model_validate({
+        mapping = {
             **common,
             "structural_match": {"command": "nebula-ssh", "scope_type": "device", "arguments": [{"operation": "literal", "value": "enable"}]},
             "value_extraction": {"operation": "constant", "value": True, "output_type": "boolean"},
             "negation_behavior": {"operation": "emit_value"},
             "removal_behavior": {"operation": "remove_value"},
             "examples": examples,
-        })
+        }
+        if kind == "runtime":
+            mapping["structural_match"]["arguments"] = [{"operation": "capture", "name": "state", "value_type": "string"}]
+            mapping["value_extraction"] = {"operation": "enum_mapping", "capture": "state", "values": {"enable": True, "disable": False}, "output_type": "boolean"}
+        return MappingDefinition.model_validate(mapping)
     if kind == "json":
         return MappingDefinition.model_validate({
             **common,
@@ -114,7 +126,7 @@ def factory():
     return create_session_factory(create_database_engine(get_settings()))
 
 
-def new_audit(session_factory, storage, organization_id, user_id, device_id, kind, body, label, *, queued: bool):
+def new_audit(session_factory, storage, organization_id, user_id, device_id, kind, body, label, *, queued: bool, assessment_pack_id=None):
     family, evidence = PAYLOADS[kind][2:]
     with session_factory.begin() as db:
         artifact_id = uuid4()
@@ -140,7 +152,7 @@ def new_audit(session_factory, storage, organization_id, user_id, device_id, kin
         audit = Audit(
             organization_id=organization_id, device_id=device_id, snapshot_id=snapshot.snapshot_id,
             revision_number=revision, reevaluation_reason=AuditReevaluationReason.INITIAL,
-            status=AuditStatus.QUEUED, selected_frameworks=[], version_refs={},
+            status=AuditStatus.QUEUED, selected_frameworks=[], version_refs=({"assessment_pack_version_id": str(assessment_pack_id)} if assessment_pack_id else {}),
             profile_resolution={}, verdict_counts={}, severity_counts={}, coverage={},
             created_by=user_id,
         )
@@ -173,6 +185,17 @@ def wait_for_audit(session_factory, audit_id):
     raise AssertionError("audit job timed out")
 
 
+def wait_for_report(session_factory, report_id):
+    for _ in range(90):
+        with session_factory() as db:
+            report = db.get(Report, report_id)
+            if report.status in {ReportStatus.READY, ReportStatus.FAILED}:
+                assert report.status is ReportStatus.READY and report.byte_size > 0, report.failure_message
+                return
+        time.sleep(1)
+    raise AssertionError("report job timed out")
+
+
 def prepare():
     session_factory, storage = factory(), get_artifact_storage()
     for kind in PROFILES:
@@ -184,6 +207,11 @@ def prepare():
             db.add(device)
             db.flush()
             device_id = device.device_id
+            if kind == "runtime":
+                profile_id = PROFILES[kind].split("@", 1)[0]
+                raw = {"schema_version":"1.0.0","profile_id":profile_id,"profile_version":"1.0.0","profile_version_id":PROFILES[kind],"vendor":"Fictitious","product_family":"Nebula Edge","os":"NebulaOS","structural_reader":"indentation_cli.v1","evidence_types":["configuration"],"device_classes":["router"],"detection":{"tokens":["Fictitious","NebulaOS"]},"version_constraints":{"supported_major_versions":[1]},"capabilities":["structural_parsing","semantic_interpretation","effective_state_resolution","administrator_training"]}
+                publish_runtime_profile(db, organization_id, parse_runtime_profile(json.dumps(raw).encode()), raw)
+                print("runtime profile published")
         positive, negative, _, _ = PAYLOADS[kind]
         initial_id, positive_id, _ = new_audit(session_factory, storage, organization_id, user_id, device_id, kind, positive, "initial", queued=False)
         AuditPipelineCoordinator(session_factory, storage).run(initial_id, organization_id)
@@ -203,8 +231,16 @@ def prepare():
             approve_mapping(db, admin, mapping_id)
             _, pack = publish_mapping(db, admin, mapping_id)
             pack_id = pack.knowledge_pack_version_id
+            assessment_pack_id = None
+            if kind == "runtime":
+                rule_payload = {"rule_id":"compose.runtime.ssh.enabled","profile_version_ids":[PROFILES[kind]],"canonical_field":FACT,"operator":"equals","expected":True,"title":"Nebula SSH enabled","security_domain":"management","severity":"high","framework_references":[]}
+                publish_runtime_rule(db, organization_id, rule_payload)
+                catalog_payload = {"schema_version":"1.0.0","pack_key":f"compose.runtime.{RUN_ID}","family":"Fictitious Runtime Framework","name":"Nebula controls","version":1,"source_version":"1","source_url":"https://example.invalid/nebula","profile_version_ids":[PROFILES[kind]],"obligations":[{"obligation_key":"NEB-SSH-1","control_id":"NEB-SSH-1","title":"Nebula SSH","severity":"high","scope":"device","assessment_method":"automatic","implementation_status":"implemented","evaluator_rule_id":"compose.runtime.ssh.enabled","policy_parameters":{}}]}
+                catalog = parse_runtime_catalog(json.dumps(catalog_payload).encode(), "nebula.json", profile_lookup=lambda value: profile_for(db, organization_id, value), rule_lookup=lambda rule_id, profile_id: runtime_rule_for(db, organization_id, rule_id, profile_id))
+                assessment_pack_id = publish_runtime_catalog(db, organization_id, catalog, "nebula.json").assessment_pack_version_id
+                print("runtime rule published\nassessment pack published")
             assert load_active_published_knowledge_pack(db, other_id, PROFILES[kind]) is None
-        before_id, _, _ = new_audit(session_factory, storage, organization_id, user_id, device_id, kind, positive, "before-restart", queued=True)
+        before_id, _, _ = new_audit(session_factory, storage, organization_id, user_id, device_id, kind, positive, "before-restart", queued=True, assessment_pack_id=assessment_pack_id)
         wait_for_audit(session_factory, before_id)
         with session_factory() as db:
             audit = db.get(Audit, before_id)
@@ -224,10 +260,15 @@ def verify():
             assert len(published) == 1
             mapping_id = published[0].mapping_version_id
             pack_id = published[0].knowledge_pack_version_id
+            assessment_pack_id = next((item.assessment_pack_version_id for item in db.scalars(select(AssessmentPackVersion).where(AssessmentPackVersion.organization_id == organization.organization_id)) if PROFILES[kind] in item.profile_version_ids), None)
         positive, negative, _, _ = PAYLOADS[kind]
-        audit_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, positive, "after-restart", queued=True)
+        audit_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, positive, "after-restart", queued=True, assessment_pack_id=assessment_pack_id)
         wait_for_audit(session_factory, audit_id)
-        missing_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, negative, "missing-after-restart", queued=True)
+        missing_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, negative, "missing-after-restart", queued=True, assessment_pack_id=assessment_pack_id)
+        fail_id = None
+        if kind == "runtime":
+            fail_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, b"! Fictitious NebulaOS version 1.0.0\nnebula-ssh disable\n", "fail-after-restart", queued=True, assessment_pack_id=assessment_pack_id)
+            wait_for_audit(session_factory, fail_id)
         wait_for_audit(session_factory, missing_id)
         with session_factory() as db:
             audit = db.get(Audit, audit_id)
@@ -238,6 +279,23 @@ def verify():
             assert fact.mapping_version_id == mapping_id
             assert finding.verdict is FindingVerdict.PASS
             assert missing.verdict is FindingVerdict.UNKNOWN
+            if kind == "runtime":
+                assert audit.profile_resolution["profile_version_id"] == PROFILES[kind]
+                result = db.scalar(select(AssessmentResult).where(AssessmentResult.audit_id == audit_id))
+                missing_result = db.scalar(select(AssessmentResult).where(AssessmentResult.audit_id == missing_id))
+                fail_result = db.scalar(select(AssessmentResult).where(AssessmentResult.audit_id == fail_id))
+                assert result.verdict == "pass" and fail_result.verdict == "fail" and missing_result.verdict == "unknown"
+                report, _ = create_report(db, user, audit_id)
+                report_id = report.report_id
+        if kind == "runtime":
+            wait_for_report(session_factory, report_id)
+            with session_factory() as db:
+                report = db.get(Report, report_id)
+                assert report.storage_reference and report.sha256 and report.byte_size > 0
+                print("report generated")
+        with session_factory() as db:
+            if kind == "runtime":
+                print("PASS confirmed\nFAIL confirmed\nUNKNOWN confirmed\npersisted runtime objects reused")
         print(kind, "PASS", pack_id)
 
 

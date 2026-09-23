@@ -51,7 +51,7 @@ def test_stage6_nist_and_iso_ac17_evidence_is_versioned_and_fail_closed(tmp_path
     outer = connection.begin()
     factory = sessionmaker(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False)
     try:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260923_0026"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260924_0027"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(factory, "Stage 6", f"stage6-{suffix}", f"stage6-{suffix}@example.invalid", "test-only-password")
         with factory.begin() as db:

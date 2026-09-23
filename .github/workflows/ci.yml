@@ -65,6 +65,7 @@ jobs:
       SIH_INTERPRETATION_POSTGRES_TEST: "1"
       SIH_WORKFLOW_POSTGRES_TEST: "1"
       SIH_RUNTIME_PACK_POSTGRES_TEST: "1"
+      SIH_RUNTIME_RULE_POSTGRES_TEST: "1"
       SIH_STAGE6_POSTGRES_TEST: "1"
       SIH_STEP4_POSTGRES_TEST: "1"
       SIH_STEP5_POSTGRES_TEST: "1"
@@ -93,8 +94,8 @@ jobs:
           alembic -c ../database/alembic.ini upgrade head
           alembic -c ../database/alembic.ini downgrade 20260909_0020
           alembic -c ../database/alembic.ini upgrade head
-          alembic -c ../database/alembic.ini heads | grep -F "20260923_0026 (head)"
-          alembic -c ../database/alembic.ini current | grep -F "20260923_0026 (head)"
+          alembic -c ../database/alembic.ini heads | grep -F "20260924_0027 (head)"
+          alembic -c ../database/alembic.ini current | grep -F "20260924_0027 (head)"
 
       - name: Run tests
         run: python -m pytest -v

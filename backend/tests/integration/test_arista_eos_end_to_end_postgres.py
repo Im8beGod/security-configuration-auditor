@@ -45,7 +45,7 @@ def test_arista_upload_audit_remediation_and_pdf(tmp_path):
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260923_0026"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260924_0027"
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(
             factory, "Arista E2E", f"arista-e2e-{suffix}",

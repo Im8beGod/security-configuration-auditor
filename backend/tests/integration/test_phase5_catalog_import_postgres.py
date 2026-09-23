@@ -25,7 +25,7 @@ def test_external_iso_catalog_import_is_versioned_manual_only_and_provenanced():
     outer = connection.begin()
     factory = sessionmaker(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False)
     try:
-        assert connection.scalar(text("select version_num from alembic_version")) == "20260923_0026"
+        assert connection.scalar(text("select version_num from alembic_version")) == "20260924_0027"
         organization_id, _ = bootstrap_admin(
             factory, "P5 Import", f"p5-{uuid4().hex}",
             f"p5-{uuid4().hex}@example.invalid", "test-only-password",

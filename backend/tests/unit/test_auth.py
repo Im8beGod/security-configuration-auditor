@@ -222,6 +222,26 @@ def test_logout_is_idempotent_and_removes_cookie(auth_context):
     assert client.post("/api/v1/auth/logout").status_code == 204
 
 
+def test_cookie_mutation_rejects_untrusted_origin_but_allows_configured_origin(auth_context):
+    client, _, settings, *_ = auth_context
+    assert login(auth_context).status_code == 200
+    rejected = client.post("/api/v1/auth/logout", headers={"Origin": "https://untrusted.example"})
+    assert rejected.status_code == 403
+    assert client.get("/api/v1/auth/me").status_code == 200
+    allowed = client.post("/api/v1/auth/logout", headers={"Origin": settings.frontend_origin})
+    assert allowed.status_code == 204
+
+
+def test_requests_without_auth_cookie_are_not_blocked_by_origin_guard(auth_context):
+    client, _, _, *_ = auth_context
+    response = client.post(
+        "/api/v1/auth/login",
+        headers={"Origin": "https://untrusted.example"},
+        json={"email": "admin@example.invalid", "password": "wrong"},
+    )
+    assert response.status_code == 401
+
+
 def test_api_surface_and_configured_prefix(auth_settings):
     auth_settings.api_prefix = "/api/test"
     application = create_app(auth_settings)

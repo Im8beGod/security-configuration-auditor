@@ -31,7 +31,7 @@ def build_report_document(device: Device, audit: Audit, findings: list[dict], as
             "vendor": profile.get("vendor"),
             "product_family": profile.get("product_family"),
             "os": profile.get("os"),
-            "os_version": profile.get("os_version"),
+            "os_version": _software_version(profile),
             "device_class": device_class,
             "model": profile.get("model"),
             "serial_number": profile.get("serial_number") or device.stable_serial_number,
@@ -51,6 +51,12 @@ def build_report_document(device: Device, audit: Audit, findings: list[dict], as
         "findings": findings,
         "assessment_results": assessment_results or [],
     }
+
+
+def _software_version(profile: dict) -> str | None:
+    version = profile.get("os_version")
+    build = (profile.get("metadata") or {}).get("os_build")
+    return f"{version} (build {build})" if isinstance(version, str) and isinstance(build, str) else version
 
 def create_report(db: Session, user: User, audit_id: UUID):
     audit = db.scalar(select(Audit).where(Audit.audit_id == audit_id, Audit.organization_id == user.organization_id))
@@ -121,8 +127,8 @@ def generate_report(db: Session, report_id: UUID, storage: ReportStorage):
                 "remediation": get_rule_remediation(
                     db, user, audit, obligation.evaluator_rule_id, result.verdict,
                     result.assessment_result_id,
-                    (result.result_details or {}).get("remediation_preview", {}).get("parameters"),
                     policy_parameters=obligation.policy_parameters,
+                    persisted_preview=(result.result_details or {}).get("remediation_preview"),
                 ) if user and obligation.evaluator_rule_id and result.verdict else {
                     "status": "unavailable", "reason": "no_automatic_evaluator",
                 },

@@ -44,7 +44,7 @@ def test_step4_integrated_workflow_reaches_truthful_queue_boundary(tmp_path):
     organization_ids = []
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260922_0024"
 
         suffix = uuid4().hex
         first_org, _ = bootstrap_admin(

@@ -20,6 +20,7 @@ from app.db.models.common import utc_now
 from app.jobs.enums import JobType
 from app.jobs.service import enqueue_job
 from app.profile_resolution.registry import PROFILE_REGISTRY
+from app.profile_resolution.runtime import profile_for
 from app.security_model import FIELD_REGISTRY
 from app.training import repository
 from app.training.ai import AISuggestionProvider, MappingSuggestion, sanitized_context, validate_suggestion, sign_preview, verify_preview
@@ -250,7 +251,7 @@ def publish_mapping(db: Session, user: User, mapping_version_id: UUID) -> tuple[
     if mapping.status != MappingStatus.APPROVED or mapping.approved_by is None or validation is None or validation.status != ValidationRunStatus.PASSED or not _validation_is_current(db, mapping, validation.results, definition):
         raise TrainingConflict("Approved, currently validated mapping is required")
     profile_ids = definition.profile_applicability.profile_version_ids
-    if not profile_ids or any(profile_id not in PROFILE_REGISTRY for profile_id in profile_ids):
+    if not profile_ids or any(profile_for(db, user.organization_id, profile_id) is None for profile_id in profile_ids):
         raise TrainingConflict("Profile applicability is required")
     pack_key = "administrator-mappings:" + ",".join(sorted(profile_ids))
     pack = db.scalar(select(KnowledgePackRecord).where(KnowledgePackRecord.organization_id == user.organization_id, KnowledgePackRecord.pack_key == pack_key).with_for_update())
@@ -403,7 +404,10 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
     profile_version_id = (definition.profile_applicability.profile_version_ids or [None])[0]
     if profile_version_id is None:
         raise TrainingConflict("Evidence validation requires a profile version")
-    ir = parse_artifact(get_artifact_storage(), artifact, profile_version_id=profile_version_id, organization_id=mapping.organization_id)
+    profile = profile_for(db, mapping.organization_id, profile_version_id)
+    if profile is None:
+        raise TrainingConflict("Evidence validation requires a published profile version")
+    ir = parse_artifact(get_artifact_storage(), artifact, profile_version_id=profile_version_id, organization_id=mapping.organization_id, profile=profile)
     mapping_adapter = _training_mapping(mapping, profile_version_id)
     pack_id = uuid5(NAMESPACE_URL, f"validation-pack:{mapping.mapping_version_id}")
     pack = KnowledgePack(pack_id, pack_id, "Validation candidate", "validation", "1.0.0", profile_version_id.split("@", 1)[0], profile_version_id, (mapping_adapter,))
@@ -412,15 +416,15 @@ def _validate_against_artifact(db: Session, mapping: MappingVersion, definition:
     context = InterpretationContext(context_id, snapshot.device_id, snapshot.snapshot_id)
     result = (
         interpret_xml_structural_ir(
-            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
+            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack, profile=profile
         )
         if isinstance(ir, XmlStructuralIR)
         else interpret_json_structural_ir(
-            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
+            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack, profile=profile
         )
         if isinstance(ir, JsonStructuralIR)
         else interpret_structural_ir(
-            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack
+            ir, context, profile_version_id=profile_version_id, knowledge_pack=pack, profile=profile
         )
     )
     transient_facts = tuple(_to_orm(item) for item in result.facts)

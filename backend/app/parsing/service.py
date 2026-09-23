@@ -10,7 +10,7 @@ from app.parsing.exceptions import (
 from app.parsing.models import ArtifactProvenance, StructuralIR, StructuralParseRequest
 from app.parsing.reader_registry import READER_REGISTRY
 from app.parsing.readers.indentation_cli import MAX_INPUT_CHARACTERS
-from app.profile_resolution.registry import PROFILE_REGISTRY
+from app.profile_resolution.registry import PROFILE_REGISTRY, ProfileManifest
 from app.snapshots.service import ELIGIBLE_ARTIFACT_STATUSES
 
 
@@ -23,10 +23,11 @@ def parse_artifact(
     *,
     profile_version_id: str,
     organization_id: UUID,
+    profile: ProfileManifest | None = None,
 ) -> StructuralIR:
     if artifact.organization_id != organization_id:
         raise ArtifactNotParseableError("artifact_not_found", "Artifact not found")
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile or PROFILE_REGISTRY.get(profile_version_id)
     if profile is None or profile.structural_reader_name is None:
         raise StructuralReaderNotFoundError(
             "structural_reader_unavailable", "No structural reader is available"

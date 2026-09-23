@@ -15,7 +15,7 @@ from app.audit.errors import (
 from app.audit.service import resolve_audit_profile
 from app.assessment_packs.service import AssessmentPackError, pin_assessment, persist_assessment_results
 from app.compliance.policy import PolicyRegistryError, select_policy_version
-from app.compliance.rule_registry import RULE_PACK_BY_PROFILE, RULE_REGISTRY, RuleRegistryError
+from app.compliance.rule_registry import GENERIC_JSON_RULE_PACK, GENERIC_RULE_PACK, GENERIC_XML_RULE_PACK, RULE_PACK_BY_PROFILE, RULE_REGISTRY, RuleRegistryError
 from app.compliance.service import ComplianceError, persist_audit_findings
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import Audit, AuditProcessingStage, AuditStatus, EffectiveState, Finding
@@ -27,9 +27,10 @@ from app.interpretation import (
     load_active_published_knowledge_pack,
     load_validated_knowledge_pack,
 )
-from app.interpretation.service import load_published_knowledge_pack
+from app.interpretation.service import load_published_knowledge_pack, runtime_baseline_knowledge_pack
 from app.effective_state.service import resolve_audit_effective_states
 from app.profile_resolution import ProfileResolutionResult, ResolutionStatus, ResolutionConfidence
+from app.profile_resolution.runtime import profile_for
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,13 @@ class AuditPipelineCoordinator:
             existing_packs = audit.version_refs.get("rule_pack_versions")
             expected_rule_pack = RULE_PACK_BY_PROFILE.get(profile_version_id)
             if expected_rule_pack is None:
+                profile = profile_for(db, organization_id, profile_version_id)
+                expected_rule_pack = {
+                    "indentation_cli.v1": GENERIC_RULE_PACK,
+                    "xml_tree.v1": GENERIC_XML_RULE_PACK,
+                    "json_tree.v1": GENERIC_JSON_RULE_PACK,
+                }.get(profile.structural_reader_name if profile else "")
+            if expected_rule_pack is None:
                 raise AuditConflictError("audit_version_conflict", "Audit compliance versions are unavailable")
             expected_pack = str(expected_rule_pack.rule_pack_version_id)
             if existing_packs is None:
@@ -271,15 +279,18 @@ class AuditPipelineCoordinator:
             if audit is None:
                 raise AuditNotFoundError("audit_not_found", "Audit not found")
             pinned = audit.version_refs.get("knowledge_pack_version_id")
+            profile = profile_for(db, organization_id, profile_version_id)
+        if profile is None:
+            raise AuditConflictError("audit_profile_version_conflict", "Audit profile version is unavailable")
         if pinned is None:
             with self._factory() as db:
                 published = load_active_published_knowledge_pack(
-                    db, organization_id, profile_version_id
+                    db, organization_id, profile_version_id, profile=profile
                 )
-            return published or load_validated_knowledge_pack(profile_version_id)
+            return published or (load_validated_knowledge_pack(profile_version_id) if profile_version_id in RULE_PACK_BY_PROFILE else runtime_baseline_knowledge_pack(profile))
         try:
             with self._factory() as db:
-                pack = load_published_knowledge_pack(db, organization_id, UUID(pinned), profile_version_id)
+                pack = load_published_knowledge_pack(db, organization_id, UUID(pinned), profile_version_id, profile=profile)
         except (TypeError, ValueError):
             raise AuditConflictError(
                 "audit_version_conflict", "Audit processing versions are already pinned differently"

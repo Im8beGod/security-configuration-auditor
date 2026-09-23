@@ -200,8 +200,8 @@ CISCO_IOS_XE_17 = ProfileManifest(
             "incomplete Cisco grammar",
             "no documented defaults, inheritance, references, or bindings",
             "no inheritance, override, or conflict resolution",
-            "internal Cisco IOS XE technical baseline only (eight bounded rules)",
-            "selected NIST SP 800-53 Rev. 5 mappings only; no CIS, STIG, ISO mappings, remediation, or reporting",
+            "only explicitly observed configuration semantics are evaluated",
+            "framework mappings and remediation remain bounded to published obligations and procedures",
         ),
     }),
 )
@@ -263,11 +263,13 @@ JUNIPER_JUNOS_18 = ProfileManifest(
         "supported_version_family": "Junos 18.4 XML configuration",
         "structural_reader": "xml_tree.v1",
         "canonical_fields": ("management.remote.ssh.enabled", "management.session.idle_timeout", "logging.remote.destination", "time.ntp.server", "time.ntp.configured"),
-        "limitations": ("reviewed 18.4R1-S2.4 scope only", "no model or serial inference from XML configuration", "unsupported structures remain UNKNOWN"),
+        "limitations": ("reviewed 18.4R1-S2.4 scope only", "model and serial require bounded chassis-inventory XML", "unsupported structures remain UNKNOWN"),
     }),
     xml_identity_selectors=(
         XmlIdentitySelector("os_version", ("rpc-reply", "configuration", "version")),
         XmlIdentitySelector("hostname", ("rpc-reply", "configuration", "system", "host-name")),
+        XmlIdentitySelector("model", ("rpc-reply", "chassis-inventory", "chassis", "description")),
+        XmlIdentitySelector("serial_number", ("rpc-reply", "chassis-inventory", "chassis", "serial-number")),
     ),
     structural_evidence_types=frozenset({ArtifactEvidenceType.STRUCTURED_EXPORT}),
 )

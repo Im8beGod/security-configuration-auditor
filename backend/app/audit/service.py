@@ -26,6 +26,7 @@ from app.profile_resolution import (
     aggregate_snapshot_evidence,
     resolve_profile,
 )
+from app.profile_resolution.runtime import runtime_profiles
 from app.snapshots.service import ELIGIBLE_ARTIFACT_STATUSES, calculate_snapshot_hash
 
 
@@ -240,7 +241,7 @@ def resolve_audit_profile(
         device_id=device_id,
         artifacts=artifacts,
     )
-    result = resolve_profile(evidence)
+    result = resolve_profile(evidence, runtime_manifests=runtime_profiles(db, organization_id))
     structural_preview: list[dict[str, object]] = []
     for document in evidence.documents:
         if document.evidence_type.value != "structured_export":
@@ -301,6 +302,9 @@ def resolve_audit_profile(
         persisted_resolution = result.to_persisted()
         persisted_resolution["structural_preview"] = structural_preview
         audit.profile_resolution = persisted_resolution
+        hostname = result.metadata.get("hostname")
+        if isinstance(hostname, str) and hostname:
+            device.latest_hostname = hostname
         db.add(ProfileResolutionDecision(
             organization_id=organization_id,
             snapshot_id=snapshot_id,

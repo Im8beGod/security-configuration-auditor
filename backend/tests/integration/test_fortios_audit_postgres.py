@@ -46,7 +46,7 @@ pytestmark = pytest.mark.skipif(
 FORTIOS_CONFIG = (
     Path(__file__).parents[1] / "fixtures" / "fortios" / "secure.conf"
 ).read_bytes()
-FORTIOS_VERSION = b"FortiOS v7.4.3,build2573\n"
+FORTIOS_VERSION = b"Version: FortiGate-100F v7.4.3,build2573\nHostname: branch-fw\nSerial-Number: FGT100FTK12345678\n"
 
 
 def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
@@ -57,7 +57,7 @@ def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
     organization_id = None
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260922_0024"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(
             factory, "FortiOS E2E", f"fortios-e2e-{suffix}",
@@ -139,6 +139,10 @@ def test_fortios_audit_reaches_terminal_pipeline_state(tmp_path, monkeypatch):
             assert persisted.version_refs["device_profile_version_id"] == "fortinet.fortios.7@1.0.0"
             assert persisted.status == AuditStatus.COMPLETED_WITH_UNKNOWNS
             assert persisted.completed_at is not None
+            assert persisted.profile_resolution["model"] == "FortiGate-100F"
+            assert persisted.profile_resolution["serial_number"] == "FGT100FTK12345678"
+            assert persisted.profile_resolution["metadata"]["os_build"] == "2573"
+            assert db.get(Device, persisted.device_id).latest_hostname == "branch-fw"
             facts = list(db.scalars(select(SecurityFact).where(SecurityFact.audit_id == audit_id)))
             assert {item.field_id for item in facts} >= {
                 "management.remote.ssh.enabled", "management.remote.telnet.enabled",

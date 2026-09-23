@@ -106,6 +106,9 @@ def _response(finding, procedure=None, reason=None, source=None):
 
 def get_remediation(db: Session, user: User, finding_id: UUID):
     finding = _finding(db, user, finding_id); audit = db.get(Audit, finding.audit_id)
+    restored = _restore_preview(db, finding, audit, getattr(finding, "remediation_preview", {}))
+    if restored is not None:
+        return restored
     procedure, reason, source = _select(db, finding, audit)
     return _response(finding, procedure, reason, source)
 
@@ -123,9 +126,14 @@ def _rule_finding(user, audit, rule_id, verdict, reference_id):
     )
 
 
-def get_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters=None, *, policy_parameters=None):
+def get_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters=None, *, policy_parameters=None, persisted_preview=None):
     """Resolve remediation for a framework result without reusing a mismatched baseline verdict."""
     finding = _rule_finding(user, audit, rule_id, verdict, reference_id)
+    restored = _restore_preview(db, finding, audit, persisted_preview, policy_parameters=policy_parameters)
+    if restored is not None:
+        restored["assessment_result_id"] = restored.pop("finding_id")
+        restored["rule_id"] = rule_id
+        return restored
     procedure, reason, source = _select(db, finding, audit)
     response = (
         _preview(db, finding, audit, parameters, policy_parameters=policy_parameters)
@@ -175,6 +183,27 @@ def _render_sections(procedure, values):
         "rendered_rollback_steps": _render_section(procedure.rollback_steps, values),
     }
 
+
+def persisted_preview_payload(preview):
+    """Persist validated rendering and exact procedure identity for later reports."""
+    if preview.get("status") != "applicable":
+        raise RemediationError("remediation_not_applicable")
+    procedure_id = preview.get("procedure_id")
+    if not isinstance(procedure_id, UUID) or not isinstance(preview.get("procedure_version"), int):
+        raise RemediationError("invalid_registry_entry")
+    payload = {
+        "procedure_id": str(procedure_id), "procedure_key": preview.get("procedure_key"),
+        "procedure_version": preview["procedure_version"],
+        "parameters": dict(preview.get("validated_parameters") or {}),
+        "rendered_steps": list(preview.get("rendered_steps") or []),
+        "rendered_verification_steps": list(preview.get("rendered_verification_steps") or []),
+        "rendered_rollback_steps": list(preview.get("rendered_rollback_steps") or []),
+        "selection_source": preview.get("selection_source"),
+    }
+    if any(_PLACEHOLDER.search(step) for value in payload.values() if isinstance(value, list) for step in value if isinstance(step, str)):
+        raise RemediationError("unresolved_parameters")
+    return payload
+
 def _validate_framework_parameters(policy_parameters, values):
     maximum = (policy_parameters or {}).get("maximum_admin_idle_timeout_seconds")
     if maximum is None or "minutes" not in values:
@@ -185,6 +214,38 @@ def _validate_framework_parameters(policy_parameters, values):
         raise RemediationError("invalid_parameters") from exc
     if minutes * 60 > maximum_seconds:
         raise RemediationError("framework_parameter_exceeds_threshold")
+
+
+def _restore_preview(db, finding, audit, stored, *, policy_parameters=None):
+    if not isinstance(stored, dict) or not stored or finding.verdict != FindingVerdict.FAIL:
+        return None
+    try:
+        procedure = db.get(RemediationProcedure, UUID(str(stored["procedure_id"])))
+        version = int(stored["procedure_version"])
+    except (KeyError, TypeError, ValueError):
+        return {"status": "unavailable", "reason": "persisted_preview_invalid", "finding_id": finding.finding_id}
+    if (
+        procedure is None or procedure.status not in {RemediationProcedureStatus.PUBLISHED, RemediationProcedureStatus.SUPERSEDED}
+        or procedure.version != version or procedure.rule_id != finding.rule_id
+        or not _applicable(procedure, finding, audit)[0]
+    ):
+        return {"status": "unavailable", "reason": "persisted_preview_unavailable", "finding_id": finding.finding_id}
+    try:
+        _validate_registry_identity(procedure)
+        _validate_procedure(procedure)
+        definitions = {item["name"]: item for item in procedure.required_parameters}
+        parameters = stored.get("parameters")
+        if not isinstance(parameters, dict) or set(parameters) - set(definitions):
+            raise RemediationError("invalid_parameters")
+        if any(definition.get("required", True) and name not in parameters for name, definition in definitions.items()):
+            raise RemediationError("missing_required_parameters")
+        values = {name: _value(definitions[name], value) for name, value in parameters.items()}
+        _validate_framework_parameters(policy_parameters, values)
+        response = _response(finding, procedure, None, "persisted_preview")
+        response.update({"status": "applicable", "validated_parameters": values, **_render_sections(procedure, values)})
+        return response
+    except RemediationError:
+        return {"status": "unavailable", "reason": "persisted_preview_invalid", "finding_id": finding.finding_id}
 
 
 def _preview(db, finding, audit, parameters, *, policy_parameters=None):
@@ -203,7 +264,10 @@ def _preview(db, finding, audit, parameters, *, policy_parameters=None):
 
 def preview_remediation(db, user, finding_id, parameters):
     finding = _finding(db, user, finding_id)
-    return _preview(db, finding, db.get(Audit, finding.audit_id), parameters)
+    preview = _preview(db, finding, db.get(Audit, finding.audit_id), parameters)
+    if preview.get("status") == "applicable":
+        finding.remediation_preview = persisted_preview_payload(preview)
+    return preview
 
 
 def preview_rule_remediation(db, user, audit, rule_id, verdict, reference_id, parameters, *, policy_parameters=None):

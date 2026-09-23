@@ -80,6 +80,8 @@ from app.parsing.exceptions import (
     StructuralReaderNotFoundError,
 )
 from app.profile_resolution import PROFILE_REGISTRY
+from app.profile_resolution.registry import ProfileManifest
+from app.profile_resolution.runtime import profile_for
 from app.security_model import (
     EvidenceRef,
     FieldRegistryValidationError,
@@ -184,8 +186,14 @@ def load_validated_knowledge_pack_by_version(
         ) from None
 
 
+def runtime_baseline_knowledge_pack(profile: ProfileManifest) -> KnowledgePack:
+    identity = uuid5(NAMESPACE_URL, f"runtime-profile:{profile.profile_version_id}")
+    return KnowledgePack(identity, identity, "Runtime declarative baseline", "1.0.0", "1.0.0", profile.profile_id, profile.profile_version_id, ())
+
+
 def load_published_knowledge_pack(
-    db: Session, organization_id: UUID, knowledge_pack_version_id: UUID, profile_version_id: str
+    db: Session, organization_id: UUID, knowledge_pack_version_id: UUID, profile_version_id: str,
+    *, profile: ProfileManifest | None = None,
 ) -> KnowledgePack:
     """Load an immutable, administrator-published Step 11 pack through the bounded DSL."""
     version = db.scalar(select(KnowledgePackVersionRecord).where(
@@ -195,7 +203,7 @@ def load_published_knowledge_pack(
     if version is None:
         return load_validated_knowledge_pack_by_version(knowledge_pack_version_id)
     record = db.get(KnowledgePackRecord, version.knowledge_pack_id)
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile or profile_for(db, organization_id, profile_version_id)
     if record is None or profile is None or not version.mapping_version_ids:
         raise InterpretationValidationError("knowledge_pack_unavailable", "No compatible knowledge pack is available")
     try:
@@ -209,7 +217,7 @@ def load_published_knowledge_pack(
         raise InterpretationValidationError("knowledge_pack_invalid", "Knowledge pack validation failed")
     # Step 11 publications add reviewed mappings to the profile's sealed baseline;
     # they never silently discard existing canonical interpretation coverage.
-    baseline = load_validated_knowledge_pack(profile_version_id)
+    baseline = load_validated_knowledge_pack(profile_version_id) if PROFILE_REGISTRY.get(profile_version_id) else runtime_baseline_knowledge_pack(profile)
     mappings = (*baseline.mappings, *tuple(_training_mapping(row, profile_version_id) for row in sorted(rows, key=lambda row: str(row.mapping_version_id))))
     pack = KnowledgePack(record.knowledge_pack_id, version.knowledge_pack_version_id, record.name,
         str(version.version), version.schema_version, profile.profile_id, profile_version_id, mappings)
@@ -221,10 +229,10 @@ def load_published_knowledge_pack(
 
 
 def load_active_published_knowledge_pack(
-    db: Session, organization_id: UUID, profile_version_id: str
+    db: Session, organization_id: UUID, profile_version_id: str, *, profile: ProfileManifest | None = None,
 ) -> KnowledgePack | None:
     """Load the newest compatible published pack for a fresh audit."""
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile or profile_for(db, organization_id, profile_version_id)
     if profile is None:
         return None
     versions = list(db.scalars(select(KnowledgePackVersionRecord).where(
@@ -271,7 +279,7 @@ def load_active_published_knowledge_pack(
         ),
     )
     return load_published_knowledge_pack(
-        db, organization_id, selected.knowledge_pack_version_id, profile_version_id
+        db, organization_id, selected.knowledge_pack_version_id, profile_version_id, profile=profile
     )
 
 
@@ -299,8 +307,9 @@ def interpret_structural_ir(
     *,
     profile_version_id: str,
     knowledge_pack: KnowledgePack | None = None,
+    profile: ProfileManifest | None = None,
 ) -> InterpretationResult:
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile or PROFILE_REGISTRY.get(profile_version_id)
     if profile is None or ir.reader_id != profile.structural_reader_name:
         raise InterpretationValidationError(
             "profile_ir_incompatible", "Resolved profile is incompatible with Structural IR"
@@ -427,9 +436,10 @@ def interpret_xml_structural_ir(
     *,
     profile_version_id: str,
     knowledge_pack: KnowledgePack | None = None,
+    profile: ProfileManifest | None = None,
 ) -> InterpretationResult:
     """Interpret XML using the same declarative mapping contract as CLI evidence."""
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile or PROFILE_REGISTRY.get(profile_version_id)
     if profile is None or ir.reader_id != profile.structural_reader_name:
         raise InterpretationValidationError("profile_ir_incompatible", "Resolved profile is incompatible with XML IR")
     if ir.source.snapshot_id != context.snapshot_id or any(node.source.artifact_id != ir.source.artifact_id for node in ir.nodes):
@@ -475,9 +485,10 @@ def interpret_json_structural_ir(
     *,
     profile_version_id: str,
     knowledge_pack: KnowledgePack | None = None,
+    profile: ProfileManifest | None = None,
 ) -> InterpretationResult:
     """Interpret exact bounded JSON paths using administrator-published mappings."""
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile or PROFILE_REGISTRY.get(profile_version_id)
     if profile is None or ir.reader_id != profile.structural_reader_name:
         raise InterpretationValidationError("profile_ir_incompatible", "Resolved profile is incompatible with JSON IR")
     if ir.source.snapshot_id != context.snapshot_id or any(node.source.artifact_id != ir.source.artifact_id for node in ir.nodes):
@@ -595,7 +606,7 @@ def interpret_audit(
 
     profile_id = audit.profile_resolution.get("profile_id")
     profile_version_id = audit.profile_resolution.get("profile_version_id")
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+    profile = profile_for(db, organization_id, profile_version_id)
     if (
         profile is None
         or profile.profile_id != profile_id
@@ -608,10 +619,10 @@ def interpret_audit(
     if knowledge_pack is not None:
         pack = knowledge_pack
     elif pinned_pack_id is None:
-        pack = load_validated_knowledge_pack(profile_version_id)
+        pack = load_validated_knowledge_pack(profile_version_id) if PROFILE_REGISTRY.get(profile_version_id) else runtime_baseline_knowledge_pack(profile)
     else:
         try:
-            pack = load_published_knowledge_pack(db, organization_id, UUID(pinned_pack_id), profile_version_id)
+            pack = load_published_knowledge_pack(db, organization_id, UUID(pinned_pack_id), profile_version_id, profile=profile)
         except (TypeError, ValueError):
             raise InterpretationValidationError(
                 "knowledge_pack_version_conflict", "Audit knowledge-pack version is incompatible"
@@ -621,7 +632,7 @@ def interpret_audit(
                 "knowledge_pack_version_conflict", "Audit knowledge-pack version is incompatible"
             )
     artifacts = validate_snapshot_evidence(db, snapshot)
-    profile_manifest = PROFILE_REGISTRY.get(profile_version_id)
+    profile_manifest = profile
     evidence_artifacts = sorted(
         (
             artifact for artifact in artifacts
@@ -693,6 +704,7 @@ def interpret_audit(
                 artifact,
                 profile_version_id=profile_version_id,
                 organization_id=organization_id,
+                profile=profile,
             ))
         except ArtifactNotParseableError as exc:
             artifact_diagnostics.append(ArtifactInterpretationDiagnostic(
@@ -711,11 +723,11 @@ def interpret_audit(
     drafts: list[SecurityFactDraft] = []
     for ir in parsed_irs:
         if isinstance(ir, XmlStructuralIR):
-            result = interpret_xml_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
+            result = interpret_xml_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack, profile=profile)
         elif isinstance(ir, JsonStructuralIR):
-            result = interpret_json_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
+            result = interpret_json_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack, profile=profile)
         else:
-            result = interpret_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack)
+            result = interpret_structural_ir(ir, context, profile_version_id=profile_version_id, knowledge_pack=pack, profile=profile)
         artifact_results.append(result)
         drafts.extend(result.facts)
 

@@ -29,7 +29,7 @@ from app.db.models import Audit, User, UserRole
 from app.db.session import get_db
 from app.remediation.schemas import RemediationPreviewRequest
 from app.remediation.service import (
-    RemediationError, get_rule_remediation, preview_rule_remediation,
+    RemediationError, get_rule_remediation, persisted_preview_payload, preview_rule_remediation,
 )
 
 
@@ -207,6 +207,7 @@ def assessment_results_endpoint(
         "remediation": get_rule_remediation(
             db, user, audit, obligation.evaluator_rule_id, result.verdict,
             result.assessment_result_id,
+            persisted_preview=(result.result_details or {}).get("remediation_preview"),
         ) if obligation.evaluator_rule_id and result.verdict else {
             "status": "unavailable", "reason": "no_automatic_evaluator",
             "assessment_result_id": str(result.assessment_result_id),
@@ -250,11 +251,7 @@ def assessment_remediation_preview_endpoint(
         )
         result.result_details = {
             **dict(result.result_details or {}),
-            "remediation_preview": {
-                "procedure_key": preview.get("procedure_key"),
-                "procedure_version": preview.get("procedure_version"),
-                "parameters": preview.get("validated_parameters", {}),
-            },
+            "remediation_preview": persisted_preview_payload(preview),
         }
         db.commit()
         return preview

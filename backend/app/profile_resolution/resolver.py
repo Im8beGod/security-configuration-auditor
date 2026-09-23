@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from app.db.models import ArtifactEvidenceType, DeviceClass
@@ -56,6 +57,12 @@ JUNOS_PATTERN = re.compile(
     rf"\b(?:JUNOS Software Release|Junos:)\s*\[?{VALUE_PATTERN}", re.IGNORECASE
 )
 FORTIOS_PATTERN = re.compile(rf"\bFortiOS\s+v?{VALUE_PATTERN}", re.IGNORECASE)
+FORTIOS_STATUS_PATTERN = re.compile(
+    rf"^\s*Version:\s*(FortiGate-[A-Za-z0-9._/-]+)\s+v?{VALUE_PATTERN}(?:,\s*build\s*(\d+))?",
+    re.IGNORECASE,
+)
+FORTIOS_HOSTNAME_PATTERN = re.compile(rf"^\s*Hostname\s*:\s*{VALUE_PATTERN}", re.IGNORECASE)
+FORTIOS_SERIAL_PATTERN = re.compile(rf"^\s*Serial-Number\s*:\s*{VALUE_PATTERN}", re.IGNORECASE)
 ARISTA_PRODUCT_PATTERN = re.compile(
     r"^\s*Arista\s+(vEOS(?:-lab)?|EOS|DCS-[A-Za-z0-9._/-]+)\b", re.IGNORECASE
 )
@@ -96,17 +103,21 @@ class _Hardware:
     signal: EvidenceSignal
 
 
-def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
+def resolve_profile(evidence: SnapshotEvidence, *, runtime_manifests: Iterable[ProfileManifest] = ()) -> ProfileResolutionResult:
     signals: list[EvidenceSignal] = []
     identities: list[_Identity] = []
     models: list[_Hardware] = []
     serials: list[_Hardware] = []
+    hostnames: list[_Hardware] = []
+    fortios_builds: list[str] = []
     cisco_syntax_signals: list[EvidenceSignal] = []
 
     for document in evidence.documents:
         document_cisco_context = False
         document_arista_context = False
+        document_fortios_context = False
         arista_versions: list[tuple[str, int]] = []
+        fortios_identity: list[tuple[str, str, int, str]] = []
         filename_signal = _signal(
             document, None, "filename_hint", "cisco_filename_hint", SignalStrength.WEAK
         )
@@ -163,7 +174,17 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
                         explicit_strength, ("vendor", "os", "os_version"),
                     )
                     identities.append(_Identity(vendor, os_name, other_match.group(1), signal))
+                    if vendor == "Fortinet":
+                        document_fortios_context = True
                     _append_signal(signals, signal)
+
+            fortios_status = FORTIOS_STATUS_PATTERN.search(match_line)
+            if fortios_status:
+                version = fortios_status.group(2)
+                if fortios_status.group(3):
+                    fortios_builds.append(fortios_status.group(3))
+                document_fortios_context = True
+                fortios_identity.append((fortios_status.group(1), version, line_number, match_line))
 
             if document.evidence_type == ArtifactEvidenceType.VERSION_OUTPUT:
                 arista_product = ARISTA_PRODUCT_PATTERN.search(match_line)
@@ -199,6 +220,12 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
                 ArtifactEvidenceType.OPERATIONAL_OUTPUT,
                 ArtifactEvidenceType.UNKNOWN_EVIDENCE,
             }:
+                hostname_match = FORTIOS_HOSTNAME_PATTERN.search(match_line)
+                serial_match = FORTIOS_SERIAL_PATTERN.search(match_line)
+                if hostname_match:
+                    fortios_identity.append(("hostname", hostname_match.group(1), line_number, "hostname"))
+                if serial_match:
+                    fortios_identity.append(("serial", serial_match.group(1), line_number, "serial"))
                 model_match = MODEL_NUMBER_PATTERN.search(match_line)
                 processor_match = CISCO_PROCESSOR_PATTERN.search(match_line)
                 model_match = processor_match or model_match
@@ -269,9 +296,24 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
                 identities.append(_Identity("Arista", "EOS", version, signal))
                 _append_signal(signals, signal)
 
-    _extract_manifest_xml_identity(evidence, identities, models, serials, signals)
+        if document_fortios_context:
+            for kind, value, line_number, _source in fortios_identity:
+                if kind.startswith("FortiGate-"):
+                    signal = _signal(document, line_number, "os_identity", "fortinet_fortios_status", SignalStrength.STRONGEST, ("vendor", "os", "os_version", "model"))
+                    identities.append(_Identity("Fortinet", "FortiOS", value, signal))
+                    models.append(_Hardware(kind, signal))
+                    _append_signal(signals, signal)
+                elif kind == "hostname":
+                    signal = _signal(document, line_number, "hardware_identity", "fortinet_hostname", SignalStrength.STRONG, ("hostname",))
+                    hostnames.append(_Hardware(value, signal)); _append_signal(signals, signal)
+                elif kind == "serial":
+                    signal = _signal(document, line_number, "hardware_identity", "fortinet_serial", SignalStrength.STRONG, ("serial_number",))
+                    serials.append(_Hardware(value, signal)); _append_signal(signals, signal)
 
-    return _resolve_candidates(
+    runtime_manifests = tuple(runtime_manifests)
+    _extract_manifest_xml_identity(evidence, identities, models, serials, hostnames, signals, runtime_manifests)
+
+    result = _resolve_candidates(
         identities=identities,
         models=models,
         serials=serials,
@@ -279,7 +321,15 @@ def resolve_profile(evidence: SnapshotEvidence) -> ProfileResolutionResult:
         signals=tuple(signals),
         unavailable_count=len(evidence.issues),
         documents=evidence.documents,
+        runtime_manifests=runtime_manifests,
     )
+    hostname = _first_value(hostnames)
+    metadata = {
+        **result.metadata,
+        **({"hostname": hostname} if hostname else {}),
+        **({"os_build": fortios_builds[0]} if len(set(fortios_builds)) == 1 else {}),
+    }
+    return replace(result, metadata=metadata)
 
 
 def _extract_manifest_xml_identity(
@@ -287,7 +337,9 @@ def _extract_manifest_xml_identity(
     identities: list[_Identity],
     models: list[_Hardware],
     serials: list[_Hardware],
+    hostnames: list[_Hardware],
     signals: list[EvidenceSignal],
+    runtime_manifests: tuple[ProfileManifest, ...] = (),
 ) -> None:
     # Keep XML parsing imports lazy because profile resolution is imported while
     # the database model package is still initializing.
@@ -296,7 +348,7 @@ def _extract_manifest_xml_identity(
 
     """Apply only manifest-declared bounded selectors to XML evidence."""
     xml_manifests = tuple(
-        item for item in PROFILE_REGISTRY.values()
+        item for item in (*PROFILE_REGISTRY.values(), *runtime_manifests)
         if item.structural_reader_name == "xml_tree.v1" and item.xml_identity_selectors
     )
     if not xml_manifests:
@@ -321,12 +373,13 @@ def _extract_manifest_xml_identity(
                 if (value := selector.matches(node.path, attributes=node.attributes, text=node.text)) is not None
             }
             version_data = values.get("os_version")
-            if version_data is None:
+            if version_data is None and not any(item.vendor == manifest.vendor and item.os == manifest.os for item in identities):
                 continue
-            version_selector, version_node, version = version_data
-            version_signal = _xml_signal(document, version_selector.field, version_selector, version_node, manifest)
-            identities.append(_Identity(manifest.vendor, manifest.os, version, version_signal))
-            _append_signal(signals, version_signal)
+            if version_data is not None:
+                version_selector, version_node, version = version_data
+                version_signal = _xml_signal(document, version_selector.field, version_selector, version_node, manifest)
+                identities.append(_Identity(manifest.vendor, manifest.os, version, version_signal))
+                _append_signal(signals, version_signal)
             for field, collection in (("hostname", values), ("model", values), ("serial_number", values)):
                 item = collection.get(field)
                 if item is None:
@@ -338,6 +391,8 @@ def _extract_manifest_xml_identity(
                     models.append(_Hardware(value, signal))
                 elif field == "serial_number":
                     serials.append(_Hardware(value, signal))
+                else:
+                    hostnames.append(_Hardware(value, signal))
 
 
 def _xml_signal(
@@ -364,6 +419,7 @@ def _resolve_candidates(
     signals: tuple[EvidenceSignal, ...],
     unavailable_count: int,
     documents: tuple[EvidenceDocument, ...],
+    runtime_manifests: tuple[ProfileManifest, ...] = (),
 ) -> ProfileResolutionResult:
     identity_keys = {(item.vendor, item.os) for item in identities}
     if len(identity_keys) > 1:
@@ -401,6 +457,9 @@ def _resolve_candidates(
         version = next(iter(versions), None)
         model = _first_value(models)
         serial_number = _first_value(serials)
+        runtime = _resolve_runtime_manifest(documents, runtime_manifests, signals)
+        if runtime is not None and runtime.vendor == vendor and runtime.os == os_name:
+            return runtime
         product_family, device_class = _classify_hardware(model)
         explicit_confidence = (
             ResolutionConfidence.HIGH
@@ -446,14 +505,14 @@ def _resolve_candidates(
         if (vendor, os_name) == ("Fortinet", "FortiOS"):
             if version is None:
                 return _result(
-                    vendor=vendor, product_family="FortiGate", os_name=os_name,
+                    vendor=vendor, product_family="FortiGate", os_name=os_name, model=model, serial_number=serial_number,
                     signals=signals, confidence=ResolutionConfidence.MEDIUM,
                     status=ResolutionStatus.PARTIALLY_RESOLVED,
                     reasons=("FortiOS version is required for profile applicability",),
                 )
             candidates = compatible_manifests(vendor, os_name, version)
             if len(candidates) > 1:
-                return _result(vendor=vendor, product_family="FortiGate", os_name=os_name, os_version=version,
+                return _result(vendor=vendor, product_family="FortiGate", os_name=os_name, os_version=version, model=model, serial_number=serial_number,
                                signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
                                status=ResolutionStatus.AMBIGUOUS,
                                reasons=("Multiple compatible profile manifests were detected",))
@@ -461,7 +520,7 @@ def _resolve_candidates(
                 selected = candidates[0]
                 return _result(
                     vendor=vendor, product_family="FortiGate", os_name=os_name,
-                    os_version=version, device_class=DeviceClass.FIREWALL,
+                    os_version=version, model=model, serial_number=serial_number, device_class=DeviceClass.FIREWALL,
                     selected_profile_id=selected.profile_id,
                     selected_profile_version_id=selected.profile_version_id,
                     signals=signals, confidence=explicit_confidence,
@@ -469,7 +528,7 @@ def _resolve_candidates(
                 )
             return _result(
                 vendor=vendor, product_family="FortiGate", os_name=os_name,
-                os_version=version, signals=signals,
+                os_version=version, model=model, serial_number=serial_number, signals=signals,
                 confidence=explicit_confidence, status=ResolutionStatus.UNSUPPORTED,
                 reasons=("Detected FortiOS version is outside the supported 7.x profile",),
             )
@@ -540,6 +599,10 @@ def _resolve_candidates(
             status=ResolutionStatus.UNSUPPORTED,
             reasons=("Detected platform has no supported deep profile",),
         )
+
+    runtime = _resolve_runtime_manifest(documents, runtime_manifests, signals)
+    if runtime is not None:
+        return runtime
 
     model = _first_value(models)
     serial_number = _first_value(serials)
@@ -615,6 +678,41 @@ def _resolve_candidates(
         signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
         status=ResolutionStatus.UNRESOLVED, reasons=tuple(reasons),
     )
+
+
+def _resolve_runtime_manifest(
+    documents: tuple[EvidenceDocument, ...], manifests: tuple[ProfileManifest, ...], signals: tuple[EvidenceSignal, ...],
+) -> ProfileResolutionResult | None:
+    matches: list[tuple[ProfileManifest, str, EvidenceDocument]] = []
+    for manifest in manifests:
+        if not manifest.detection_tokens:
+            continue
+        pattern = re.compile(r"\bversion\s*[:=]?\s*v?(\d+(?:\.\d+)+(?:[A-Za-z0-9.-]+)?)", re.IGNORECASE)
+        for document in documents:
+            if document.evidence_type not in manifest.accepted_evidence_types:
+                continue
+            if not all(token.casefold() in document.text.casefold() for token in manifest.detection_tokens):
+                continue
+            found = pattern.search(document.text[:MAX_LINE_CHARACTERS * MAX_LINES_PER_ARTIFACT])
+            if found and manifest.version_constraint.accepts(found.group(1)):
+                matches.append((manifest, found.group(1), document))
+    if not matches:
+        return None
+    identities = {(item.profile_version_id, version) for item, version, _document in matches}
+    if len(identities) != 1:
+        return _result(signals=signals, confidence=ResolutionConfidence.UNRESOLVED,
+                       status=ResolutionStatus.AMBIGUOUS,
+                       reasons=("Multiple compatible runtime profile manifests were detected",))
+    manifest, version, document = matches[0]
+    signal = EvidenceSignal(artifact_id=document.artifact_id, evidence_type=document.evidence_type,
+                            line_number=None, category="runtime_manifest_identity",
+                            signal_id=f"{manifest.profile_id}:detection", strength=SignalStrength.STRONG,
+                            extracted_fields=("vendor", "os", "os_version"), source_label=document.original_filename)
+    return _result(vendor=manifest.vendor, product_family=manifest.product_family, os_name=manifest.os,
+                   os_version=version, device_class=next(iter(manifest.device_classes)),
+                   selected_profile_id=manifest.profile_id, selected_profile_version_id=manifest.profile_version_id,
+                   signals=(*signals, signal), confidence=ResolutionConfidence.HIGH,
+                   status=ResolutionStatus.RESOLVED, reasons=("Published runtime profile matched bounded evidence",))
 
 
 def _administrator_labels(documents: tuple[EvidenceDocument, ...]) -> dict[str, str]:

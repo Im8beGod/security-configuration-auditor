@@ -1,5 +1,8 @@
 import os
+import re
+from base64 import a85decode
 from uuid import uuid4
+from zlib import decompress
 
 import pytest
 from sqlalchemy import select, text
@@ -14,7 +17,7 @@ from app.db.engine import create_database_engine
 from app.db.models import AssessmentObligation, AssessmentResult, Audit, Device, Finding, ReportStatus, User
 from app.ingestion.service import ingest_artifact
 from app.ingestion.storage import LocalFilesystemArtifactStorage
-from app.remediation.service import preview_remediation, preview_rule_remediation
+from app.remediation.service import persisted_preview_payload, preview_remediation, preview_rule_remediation
 from app.remediation.service import RemediationError
 from app.reporting.service import create_report, generate_report, mark_generating
 from app.reporting.storage import LocalFilesystemReportStorage
@@ -71,7 +74,7 @@ def test_vendor_upload_audit_remediation_and_pdf(
     artifacts = LocalFilesystemArtifactStorage(tmp_path / "artifacts")
     reports = LocalFilesystemReportStorage(tmp_path / "reports")
     try:
-        assert connection.scalar(text("select version_num from alembic_version")) == "20260920_0023"
+        assert connection.scalar(text("select version_num from alembic_version")) == "20260922_0024"
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(
             factory, "P5 Vendor", f"p5-vendor-{suffix}",
@@ -107,6 +110,7 @@ def test_vendor_upload_audit_remediation_and_pdf(
             preview = preview_remediation(db, user, finding.finding_id, parameters)
             assert expected_command in preview["rendered_steps"]
             assert preview["rendered_verification_steps"] and preview["rendered_rollback_steps"]
+            assert finding.remediation_preview == persisted_preview_payload(preview)
             if profile.startswith("cisco."):
                 result, obligation = db.execute(select(AssessmentResult, AssessmentObligation).join(
                     AssessmentObligation,
@@ -133,7 +137,7 @@ def test_vendor_upload_audit_remediation_and_pdf(
                         {"vty_range": "0 4", "minutes": "6"},
                         policy_parameters=obligation.policy_parameters,
                     )
-                result.result_details = {**result.result_details, "remediation_preview": {"parameters": framework_preview["validated_parameters"]}}
+                result.result_details = {**result.result_details, "remediation_preview": persisted_preview_payload(framework_preview)}
                 db.flush()
             report, _ = create_report(db, user, audit_id)
             report_id = report.report_id
@@ -143,6 +147,9 @@ def test_vendor_upload_audit_remediation_and_pdf(
             assert generated.status is ReportStatus.READY
             pdf = reports.read(generated.storage_reference)
             assert pdf.startswith(b"%PDF") and b"{minutes}" not in pdf
+            streams = re.findall(rb"stream\r?\n(.*?)endstream", pdf, re.S)
+            rendered = b"".join(decompress(a85decode(stream.strip(), adobe=True)) for stream in streams)
+            assert expected_command.encode() in rendered
     finally:
         outer.rollback()
         connection.close()

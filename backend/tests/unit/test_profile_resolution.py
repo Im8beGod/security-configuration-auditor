@@ -117,6 +117,47 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
     assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.3.0"
 
 
+def test_fortios_status_identity_includes_hostname_model_serial_and_build():
+    result = _resolve(_document(
+        "Version: FortiGate-100F v7.4.3,build2573\nHostname: branch-fw\nSerial-Number: FGT100FTK12345678\n",
+        evidence_type=ArtifactEvidenceType.VERSION_OUTPUT,
+    ))
+    assert result.selected_profile_version_id == "fortinet.fortios.7@1.0.0"
+    assert (result.os_version, result.model, result.serial_number) == (
+        "7.4.3", "FortiGate-100F", "FGT100FTK12345678",
+    )
+    assert result.metadata["hostname"] == "branch-fw"
+    assert result.metadata["os_build"] == "2573"
+    from types import SimpleNamespace
+    from app.reporting.service import build_report_document
+    document = build_report_document(
+        SimpleNamespace(display_name="Forti", latest_hostname=result.metadata["hostname"], stable_serial_number=None, asset_tag=None, device_class=None),
+        SimpleNamespace(profile_resolution=result.to_persisted(), version_refs={}, audit_id="forti", revision_number=1, status=SimpleNamespace(value="completed"), verdict_counts={}, severity_counts={}, coverage={}),
+        [],
+    )
+    identity = document["device_identification"]
+    assert identity["hostname"] == "branch-fw" and identity["model"] == "FortiGate-100F"
+    assert identity["serial_number"] == "FGT100FTK12345678" and identity["os_version"] == "7.4.3 (build 2573)"
+
+
+def test_junos_chassis_inventory_xml_identity_requires_explicit_version_evidence():
+    result = _resolve(
+        _document("<rpc-reply><configuration><version>18.4R1-S2.4</version></configuration></rpc-reply>", artifact_number=1),
+        _document("<rpc-reply><chassis-inventory><chassis><description>MX480</description><serial-number>JN1234567890</serial-number></chassis></chassis-inventory></rpc-reply>", artifact_number=2),
+    )
+    assert result.selected_profile_version_id == "juniper.junos.18@1.0.0"
+    assert (result.model, result.serial_number) == ("MX480", "JN1234567890")
+    assert result.identity_provenance["model"][0]["path"][-1] == "description[1]"
+    from types import SimpleNamespace
+    from app.reporting.service import build_report_document
+    identity = build_report_document(
+        SimpleNamespace(display_name="Junos", latest_hostname=None, stable_serial_number=None, asset_tag=None, device_class=None),
+        SimpleNamespace(profile_resolution=result.to_persisted(), version_refs={}, audit_id="junos", revision_number=1, status=SimpleNamespace(value="completed"), verdict_counts={}, severity_counts={}, coverage={}),
+        [],
+    )["device_identification"]
+    assert identity["model"] == "MX480" and identity["serial_number"] == "JN1234567890"
+
+
 def test_explicit_ios_xe_17_version_selects_stable_supported_profile():
     result = _resolve(_document(
         "Cisco IOS XE Software, Version 17.9.4a\n"

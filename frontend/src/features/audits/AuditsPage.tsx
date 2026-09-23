@@ -23,6 +23,7 @@ export function AuditsPage() {
   const [selectedSnapshots, setSelectedSnapshots] = useState<string[]>([])
   const [batchResults, setBatchResults] = useState<BatchAuditResponse | null>(null)
   const [frameworksBySnapshot, setFrameworksBySnapshot] = useState<Record<string, string[]>>({})
+  const [assessmentPackBySnapshot, setAssessmentPackBySnapshot] = useState<Record<string, string>>({})
   const readySnapshots: ReadySnapshot[] = snapshotQueries.flatMap((query, index) => {
     const device = devices.data?.[index]
     return device ? (query.data ?? []).filter((snapshot) => snapshot.status === 'ready').map((snapshot) => ({ device, snapshot })) : []
@@ -31,12 +32,14 @@ export function AuditsPage() {
   const batch = useMutation({
     mutationFn: () => createBatchAudits(selectedSnapshots.flatMap((snapshotId) => {
       const item = snapshotById.get(snapshotId)
-      return item ? [{ device_id: item.device.device_id, snapshot_id: item.snapshot.snapshot_id, selected_frameworks: frameworksBySnapshot[snapshotId] ?? [] }] : []
+      const assessmentPackVersionId = assessmentPackBySnapshot[snapshotId]
+      return item ? [{ device_id: item.device.device_id, snapshot_id: item.snapshot.snapshot_id, selected_frameworks: assessmentPackVersionId ? [] : (frameworksBySnapshot[snapshotId] ?? []), ...(assessmentPackVersionId ? { assessment_pack_version_id: assessmentPackVersionId } : {}) }] : []
     })),
     onSuccess: (result) => {
       setBatchResults(result)
       setSelectedSnapshots([])
       setFrameworksBySnapshot({})
+      setAssessmentPackBySnapshot({})
       void queryClient.invalidateQueries({ queryKey: workflowKeys.audits })
     },
   })
@@ -52,7 +55,7 @@ export function AuditsPage() {
     <header className="page-heading"><div><span className="eyebrow">Steps 5-7</span><h1>Audits</h1></div><p>Submit ready Cisco and FortiOS snapshots together. Each item keeps its own audit and job result.</p></header>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">Batch submission</span><h2>Select ready snapshots</h2></div><span>{selectedSnapshots.length} selected</span></div>
-      {snapshotsError ? <p className="error-message" role="alert">{errorMessage(snapshotsError)}</p> : snapshotsPending ? <p className="quiet-state" aria-live="polite">Loading ready snapshots...</p> : readySnapshots.length === 0 ? <p className="quiet-state">No ready snapshots are available. Finalize evidence from a device first.</p> : <div className="selection-list">{readySnapshots.map(({ device, snapshot }) => <label key={snapshot.snapshot_id}><input type="checkbox" checked={selectedSnapshots.includes(snapshot.snapshot_id)} onChange={(event) => toggleSnapshot(snapshot.snapshot_id, event.target.checked)} /><span><strong>{device.display_name}</strong><small>{snapshot.label ?? `Snapshot ${shortId(snapshot.snapshot_id)}`} - {snapshot.artifact_count} evidence file{snapshot.artifact_count === 1 ? '' : 's'}</small><select multiple aria-label={`Frameworks for ${device.display_name}`} value={frameworksBySnapshot[snapshot.snapshot_id] ?? []} onChange={(event) => setFrameworksBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: Array.from(event.target.selectedOptions, (option) => option.value) }))}><option value="cis">CIS Benchmarks</option><option value="nist">NIST SP 800-53</option><option value="disa">DISA STIG/SRG</option><option value="iso">ISO/IEC 27001</option></select></span><StatusBadge value="ready" /></label>)}</div>}
+      {snapshotsError ? <p className="error-message" role="alert">{errorMessage(snapshotsError)}</p> : snapshotsPending ? <p className="quiet-state" aria-live="polite">Loading ready snapshots...</p> : readySnapshots.length === 0 ? <p className="quiet-state">No ready snapshots are available. Finalize evidence from a device first.</p> : <div className="selection-list">{readySnapshots.map(({ device, snapshot }) => <label key={snapshot.snapshot_id}><input type="checkbox" checked={selectedSnapshots.includes(snapshot.snapshot_id)} onChange={(event) => toggleSnapshot(snapshot.snapshot_id, event.target.checked)} /><span><strong>{device.display_name}</strong><small>{snapshot.label ?? `Snapshot ${shortId(snapshot.snapshot_id)}`} - {snapshot.artifact_count} evidence file{snapshot.artifact_count === 1 ? '' : 's'}</small><select aria-label={`Assessment pack for ${device.display_name}`} value={assessmentPackBySnapshot[snapshot.snapshot_id] ?? ''} onChange={(event) => setAssessmentPackBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: event.target.value }))}><option value="">Framework selection</option>{(assessmentPacks.data ?? []).map((pack) => <option key={pack.assessment_pack_version_id} value={pack.assessment_pack_version_id}>{pack.family}: {pack.name} v{pack.version}</option>)}</select><select multiple aria-label={`Frameworks for ${device.display_name}`} disabled={Boolean(assessmentPackBySnapshot[snapshot.snapshot_id])} value={frameworksBySnapshot[snapshot.snapshot_id] ?? []} onChange={(event) => setFrameworksBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: Array.from(event.target.selectedOptions, (option) => option.value) }))}><option value="cis">CIS Benchmarks</option><option value="nist">NIST SP 800-53</option><option value="disa">DISA STIG/SRG</option><option value="iso">ISO/IEC 27001</option></select></span><StatusBadge value="ready" /></label>)}</div>}
       {assessmentPacks.isError && <p className="error-message" role="alert">Assessment Pack choices are unavailable: {errorMessage(assessmentPacks.error)}</p>}
       {batch.isError && <p className="error-message" role="alert">{errorMessage(batch.error)}</p>}
       <button className="button-primary" disabled={selectedSnapshots.length < 2 || batch.isPending} onClick={() => batch.mutate()}>{batch.isPending ? 'Submitting batch...' : `Submit ${selectedSnapshots.length || ''} selected audits`}</button>

@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.assessment_packs.catalog import (
     CatalogImportError, MAX_EXTERNAL_CATALOG_BYTES, import_external_catalog,
+    parse_runtime_catalog, publish_runtime_catalog, runtime_catalog_preview,
 )
 from app.auth.dependencies import require_roles
 from app.db.models import User, UserRole
@@ -14,6 +15,50 @@ from app.db.session import get_db
 
 router = APIRouter(prefix="/assessment-packs", tags=["assessment-packs"])
 CatalogAdmin = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
+
+
+async def _runtime_catalog(file: UploadFile):
+    return parse_runtime_catalog(
+        await file.read(MAX_EXTERNAL_CATALOG_BYTES + 1), file.filename or "assessment-pack.json",
+    )
+
+
+@router.post("/preview")
+async def preview_runtime_catalog(
+    file: Annotated[UploadFile, File(...)], user: CatalogAdmin,
+):
+    del user
+    try:
+        return runtime_catalog_preview(await _runtime_catalog(file))
+    except CatalogImportError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/publish", status_code=201)
+async def publish_runtime_catalog_endpoint(
+    file: Annotated[UploadFile, File(...)],
+    preview_digest: Annotated[str, Form(...)],
+    user: CatalogAdmin,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        catalog = await _runtime_catalog(file)
+        if preview_digest != catalog.source_digest:
+            raise CatalogImportError("Published catalog does not match the validated preview")
+        pack = publish_runtime_catalog(db, user.organization_id, catalog, file.filename or "assessment-pack.json")
+        db.commit()
+        db.refresh(pack)
+    except CatalogImportError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Catalog version conflicts with published data") from exc
+    return {
+        **runtime_catalog_preview(catalog),
+        "assessment_pack_version_id": str(pack.assessment_pack_version_id),
+        "status": pack.status,
+    }
 
 
 @router.post("/import", status_code=201)

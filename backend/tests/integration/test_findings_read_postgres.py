@@ -165,7 +165,7 @@ def test_findings_read_api_preserves_canonical_values_and_fails_closed(tmp_path)
     organization_ids = []
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260920_0023"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260922_0024"
         suffix = uuid4().hex
         organization_id, user_id = bootstrap_admin(factory, "Step 8 Read", f"step8-read-{suffix}", f"step8-read-{suffix}@example.invalid", "test-only-password")
         other_organization_id, _ = bootstrap_admin(factory, "Step 8 Other", f"step8-other-{suffix}", f"step8-other-{suffix}@example.invalid", "test-only-password")

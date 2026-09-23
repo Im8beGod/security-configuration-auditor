@@ -30,6 +30,7 @@ class Finding(Base):
         CheckConstraint("jsonb_typeof(effective_state_refs) = 'array'", name="ck_findings_effective_state_refs"),
         CheckConstraint("jsonb_typeof(evidence_refs) = 'array'", name="ck_findings_evidence_refs"),
         CheckConstraint("jsonb_typeof(framework_references) = 'array'", name="ck_findings_framework_references"),
+        CheckConstraint("jsonb_typeof(remediation_preview) = 'object'", name="ck_findings_remediation_preview"),
         CheckConstraint(
             "(verdict = 'unknown' AND unknown_reason IS NOT NULL) OR "
             "(verdict <> 'unknown' AND unknown_reason IS NULL)",
@@ -56,5 +57,6 @@ class Finding(Base):
     unknown_reason: Mapped[UnresolvedReason | None] = mapped_column(SqlEnum(UnresolvedReason, name="ck_findings_unknown_reason", native_enum=False, create_constraint=True, validate_strings=True, values_callable=lambda enum: [item.value for item in enum], length=32), nullable=True)
     framework_references: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     remediation_procedure_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    remediation_preview: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default="1.0.0", server_default="1.0.0")

@@ -44,6 +44,10 @@ def remediation(finding_id: UUID, user: Annotated[User, Depends(get_current_user
 
 @router.post("/findings/{finding_id}/remediation/preview")
 def remediation_preview(finding_id: UUID, request: RemediationPreviewRequest, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
-    try: return preview_remediation(db, user, finding_id, request.parameters)
+    try:
+        preview = preview_remediation(db, user, finding_id, request.parameters)
+        if preview.get("status") == "applicable":
+            db.commit()
+        return preview
     except FindingNotFoundError as error: raise _error(error) from None
     except RemediationError as error: raise HTTPException(422, "Remediation parameters are invalid") from error

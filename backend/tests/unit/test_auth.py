@@ -239,6 +239,8 @@ def test_api_surface_and_configured_prefix(auth_settings):
             "/api/test/audits": {"get", "post"},
             "/api/test/audits/assessment-packs": {"get"},
             "/api/test/assessment-packs/import": {"post"},
+            "/api/test/assessment-packs/preview": {"post"},
+            "/api/test/assessment-packs/publish": {"post"},
             "/api/test/audits/batch": {"post"},
             "/api/test/audits/{audit_id}": {"get"},
                 "/api/test/audits/{audit_id}/profile-resolution": {"get"},
@@ -281,7 +283,10 @@ def test_api_surface_and_configured_prefix(auth_settings):
         "/api/test/training/canonical-fields": {"get"},
         "/api/test/training/ai/status": {"get"},
         "/api/test/training/capabilities": {"get"},
-        "/api/test/training/profiles": {"get"},
+            "/api/test/training/profiles": {"get"},
+            "/api/test/training/profile-manifests/preview": {"post"},
+            "/api/test/training/profile-manifests/publish": {"post"},
+            "/api/test/training/profile-manifests/test": {"post"},
     }
     with TestClient(application) as client:
         assert client.post("/api/test/auth/register").status_code == 404

@@ -90,6 +90,7 @@ def test_postgres_bootstrap_and_cookie_authentication():
 
                 application.dependency_overrides[get_db] = session_dependency
                 with TestClient(application) as client:
+                    client.headers.update({"Origin": settings.frontend_origin})
                     credentials = {"email": email.upper(), "password": password}
                     response = client.post("/api/v1/auth/login", json=credentials)
                     assert response.status_code == 200
@@ -124,7 +125,10 @@ def test_postgres_bootstrap_and_cookie_authentication():
                         ).values(is_active=False))
                     assert client.get("/api/v1/auth/me").status_code == 401
                     assert client.post("/api/v1/auth/login", json=credentials).status_code == 401
-                    assert client.post("/api/v1/auth/logout").status_code == 204
+                    assert client.post(
+                        "/api/v1/auth/logout",
+                        headers={"Origin": settings.frontend_origin},
+                    ).status_code == 204
                     assert settings.auth_cookie_name not in client.cookies
             finally:
                 transaction.rollback()

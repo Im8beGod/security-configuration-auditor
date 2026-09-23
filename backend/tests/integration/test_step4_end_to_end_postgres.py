@@ -67,6 +67,7 @@ def test_step4_integrated_workflow_reaches_truthful_queue_boundary(tmp_path):
 
         application.dependency_overrides[get_db] = session_dependency
         with TestClient(application) as client:
+            client.headers.update({"Origin": settings.frontend_origin})
             assert client.post("/api/v1/auth/login", json={
                 "email": f"step4-a-{suffix}@example.invalid",
                 "password": "test-only-password",

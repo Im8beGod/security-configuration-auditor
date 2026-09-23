@@ -86,6 +86,7 @@ def test_batch_submission_persists_independent_cisco_and_fortios_audits():
         application.dependency_overrides[get_settings] = lambda: settings
         application.dependency_overrides[get_db] = session_dependency
         with TestClient(application) as client:
+            client.headers.update({"Origin": settings.frontend_origin})
             assert client.post("/api/v1/auth/login", json={
                 "email": f"batch-audit-{suffix}@example.invalid", "password": "test-password",
             }).status_code == 200

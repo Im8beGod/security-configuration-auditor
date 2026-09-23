@@ -171,6 +171,7 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
             counts = lambda: [db.scalar(select(func.count()).select_from(model)) for model in count_models]
             before = counts()
             with TestClient(app) as client:
+                client.headers.update({"Origin": get_settings().frontend_origin})
                 if real_ollama:
                     assert provider.status()["available"] is True
                 response = client.post(f"/api/v1/training/unresolved/{block_id}/suggest")
@@ -324,6 +325,7 @@ def test_runtime_cli_ai_training_lifecycle(tmp_path, monkeypatch, real_ollama):
             before = db.scalar(select(func.count()).select_from(MappingVersion).where(MappingVersion.organization_id == organization_id))
             other = db.get(User, other_id)
             with TestClient(app) as client:
+                client.headers.update({"Origin": get_settings().frontend_origin})
                 preview_response = client.post(f"/api/v1/training/unresolved/{block_id}/suggest")
                 assert preview_response.status_code == 200, preview_response.text
                 preview = preview_response.json()

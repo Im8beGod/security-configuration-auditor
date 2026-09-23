@@ -176,6 +176,7 @@ def test_concurrent_audit_start_is_atomic_tenant_scoped_and_worker_safe():
 
         application.dependency_overrides[get_db] = session_dependency
         with TestClient(application) as client:
+            client.headers.update({"Origin": settings.frontend_origin})
             assert client.post("/api/v1/auth/login", json={
                 "email": f"audit-a-{suffix}@example.invalid", "password": "test-password"
             }).status_code == 200

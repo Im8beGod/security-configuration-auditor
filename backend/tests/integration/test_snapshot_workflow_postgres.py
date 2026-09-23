@@ -149,6 +149,7 @@ def test_postgres_device_snapshot_api_is_tenant_isolated():
 
                 application.dependency_overrides[get_db] = session_dependency
                 with TestClient(application) as client:
+                    client.headers.update({"Origin": settings.frontend_origin})
                     assert client.post("/api/v1/auth/login", json={
                         "email": f"workflow-a-{suffix}@example.invalid",
                         "password": "test-password",

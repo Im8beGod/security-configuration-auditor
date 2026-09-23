@@ -62,6 +62,7 @@ def test_postgres_artifact_ingestion_and_tenant_isolation(tmp_path):
 
                 application.dependency_overrides[get_db] = session_dependency
                 with TestClient(application) as client:
+                    client.headers.update({"Origin": settings.frontend_origin})
                     login = client.post("/api/v1/auth/login", json={
                         "email": f"artifact-a-{suffix}@example.invalid",
                         "password": "test-only-password",

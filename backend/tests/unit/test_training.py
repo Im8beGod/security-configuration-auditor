@@ -142,6 +142,7 @@ def test_analyst_cannot_approve_or_publish(identity_factory, auth_settings):
             yield db
     app.dependency_overrides[get_db] = sessions
     with TestClient(app) as client:
+        client.headers.update({"Origin": auth_settings.frontend_origin})
         assert client.post("/api/v1/auth/login", json={"email": "training@example.invalid", "password": password}).status_code == 200
         mapping_id = uuid4()
         assert client.post(f"/api/v1/training/mappings/{mapping_id}/approve").status_code == 403

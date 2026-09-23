@@ -20,6 +20,9 @@ class ApplicationSettings(BaseSettings):
     app_env: str = "development"
     api_prefix: str = "/api/v1"
     frontend_origin: str = "http://localhost:5173"
+    auth_cookie_name: str = Field(
+        default="sih26155_access_token", pattern=r"^[A-Za-z0-9_-]+$"
+    )
 
     @field_validator("api_prefix")
     @classmethod
@@ -62,9 +65,6 @@ class Settings(ApplicationSettings):
     jwt_algorithm: Literal["HS256"] = "HS256"
     jwt_access_token_expire_minutes: int = Field(default=30, gt=0)
 
-    auth_cookie_name: str = Field(
-        default="sih26155_access_token", pattern=r"^[A-Za-z0-9_-]+$"
-    )
     auth_cookie_secure: bool = False
     auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     auth_cookie_path: str = Field(default="/", pattern=r"^/[^\s;]*$")

@@ -11,7 +11,7 @@ The backend suite contains deterministic unit tests plus opt-in PostgreSQL
 integration tests for authentication, persistence constraints, durable-job
 concurrency, and worker lifecycle behavior. CI enables all PostgreSQL
 integration tests after migrating an empty PostgreSQL 17 service to Alembic
-head `20260906_0004`.
+head `20260924_0027`.
 
 From `backend/`, normal tests run with:
 

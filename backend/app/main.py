@@ -18,7 +18,7 @@ def create_app(settings: ApplicationSettings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=[routing_settings.frontend_origin],
         allow_credentials=True,
-        allow_methods=["DELETE", "GET", "PATCH", "POST"],
+        allow_methods=["DELETE", "GET", "PATCH", "POST", "PUT"],
         allow_headers=["Content-Type"],
     )
 
@@ -27,14 +27,13 @@ def create_app(settings: ApplicationSettings | None = None) -> FastAPI:
         """Reject cross-origin state changes made with the auth cookie.
 
         Requests without the cookie are left alone for login and internal
-        worker paths.  A missing Origin is also allowed for non-browser,
-        same-origin clients; browsers include Origin on cross-origin writes,
-        which are rejected unless they match the configured frontend origin.
+        worker paths. Cookie-authenticated mutations must carry the exact
+        configured frontend Origin, including same-origin browser requests.
         """
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-            cookie = request.cookies.get(settings.auth_cookie_name)
+            cookie = request.cookies.get(routing_settings.auth_cookie_name)
             origin = request.headers.get("origin")
-            if cookie and origin is not None and origin.rstrip("/") != settings.frontend_origin:
+            if cookie is not None and origin != routing_settings.frontend_origin:
                 return JSONResponse(status_code=403, content={"detail": "Untrusted request origin"})
         return await call_next(request)
     application.add_api_route("/health", health_check, methods=["GET"])

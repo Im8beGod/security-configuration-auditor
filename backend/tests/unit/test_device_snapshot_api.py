@@ -33,6 +33,7 @@ def workflow_context(workflow_factory, auth_settings, tmp_path):
 
     application.dependency_overrides[get_db] = session_dependency
     with TestClient(application) as client:
+        client.headers.update({"Origin": auth_settings.frontend_origin})
         yield client, workflow_factory, first, second
 
 

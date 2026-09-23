@@ -11,9 +11,10 @@ from sqlalchemy import delete, update
 from app.auth.dependencies import require_roles
 from app.cli.bootstrap_admin import bootstrap_admin
 from app.core.config import get_settings
+from app.core.config import get_application_settings
 from app.db.models import Organization, User, UserRole
 from app.db.session import get_db
-from app.main import create_app
+from app.main import app as default_app, create_app
 
 
 @pytest.fixture
@@ -42,6 +43,7 @@ def auth_context(identity_factory, auth_settings):
             f"/test-only/{role.value}", endpoint, methods=["GET"]
         )
     with TestClient(application) as client:
+        client.headers.update({"Origin": auth_settings.frontend_origin})
         yield client, identity_factory, auth_settings, org_id, user_id, password
 
 
@@ -79,7 +81,7 @@ def test_cookie_secure_and_logout_attributes(auth_context):
     cookie = SimpleCookie(response.headers["set-cookie"])["test_auth"]
     assert cookie["secure"] and cookie["httponly"]
     assert cookie["samesite"] == "strict" and cookie["path"] == "/api"
-    logout = client.post("/api/v1/auth/logout")
+    logout = client.post("/api/v1/auth/logout", headers={"Origin": settings.frontend_origin})
     removed = SimpleCookie(logout.headers["set-cookie"])["test_auth"]
     assert removed["path"] == cookie["path"]
     assert removed["secure"] and removed["httponly"]
@@ -213,9 +215,9 @@ def test_jwt_role_claim_cannot_elevate_user(auth_context):
 
 
 def test_logout_is_idempotent_and_removes_cookie(auth_context):
-    client = auth_context[0]
+    client, _, settings, *_ = auth_context
     assert login(auth_context).status_code == 200
-    response = client.post("/api/v1/auth/logout")
+    response = client.post("/api/v1/auth/logout", headers={"Origin": settings.frontend_origin})
     assert response.status_code == 204
     assert "test_auth" not in client.cookies
     assert client.get("/api/v1/auth/me").status_code == 401
@@ -230,6 +232,48 @@ def test_cookie_mutation_rejects_untrusted_origin_but_allows_configured_origin(a
     assert client.get("/api/v1/auth/me").status_code == 200
     allowed = client.post("/api/v1/auth/logout", headers={"Origin": settings.frontend_origin})
     assert allowed.status_code == 204
+
+
+def test_default_global_app_handles_login_and_requires_origin_for_cookie_mutations(auth_context):
+    _, factory, configured_settings, *_ = auth_context
+    routing_settings = get_application_settings()
+    settings = configured_settings.model_copy(update={
+        "auth_cookie_name": routing_settings.auth_cookie_name,
+        "frontend_origin": routing_settings.frontend_origin,
+    })
+
+    def session_dependency():
+        with factory() as db:
+            yield db
+
+    default_app.dependency_overrides[get_settings] = lambda: settings
+    default_app.dependency_overrides[get_db] = session_dependency
+    try:
+        with TestClient(default_app) as client:
+            login_response = client.post(
+                "/api/v1/auth/login",
+                json={"email": "admin@example.invalid", "password": "test-only-admin-password"},
+            )
+            assert login_response.status_code == 200
+            for method, path in (
+                ("POST", "/api/v1/devices"),
+                ("PUT", "/api/v1/training/mappings/00000000-0000-0000-0000-000000000000"),
+                ("PATCH", "/api/v1/devices/00000000-0000-0000-0000-000000000000"),
+                ("DELETE", "/api/v1/snapshots/00000000-0000-0000-0000-000000000000/artifacts/00000000-0000-0000-0000-000000000000"),
+            ):
+                assert client.request(method, path, json={}).status_code == 403
+            assert client.post("/api/v1/auth/logout").status_code == 403
+            assert client.post(
+                "/api/v1/auth/logout",
+                headers={"Origin": "https://untrusted.example"},
+            ).status_code == 403
+            assert client.post(
+                "/api/v1/auth/logout",
+                headers={"Origin": routing_settings.frontend_origin},
+            ).status_code == 204
+    finally:
+        default_app.dependency_overrides.pop(get_settings, None)
+        default_app.dependency_overrides.pop(get_db, None)
 
 
 def test_requests_without_auth_cookie_are_not_blocked_by_origin_guard(auth_context):
@@ -311,6 +355,7 @@ def test_api_surface_and_configured_prefix(auth_settings):
             "/api/test/training/profile-manifests/test": {"post"},
     }
     with TestClient(application) as client:
+        client.headers.update({"Origin": auth_settings.frontend_origin})
         assert client.post("/api/test/auth/register").status_code == 404
         assert client.post("/api/test/auth/signup").status_code == 404
         preflight = client.options(
@@ -325,6 +370,15 @@ def test_api_surface_and_configured_prefix(auth_settings):
             auth_settings.frontend_origin
         )
         assert preflight.headers["access-control-allow-credentials"] == "true"
+        put_preflight = client.options(
+            "/api/test/training/mappings/test",
+            headers={
+                "Origin": auth_settings.frontend_origin,
+                "Access-Control-Request-Method": "PUT",
+            },
+        )
+        assert put_preflight.status_code == 200
+        assert put_preflight.headers["access-control-allow-origin"] == auth_settings.frontend_origin
         rejected = client.options(
             "/api/test/auth/login",
             headers={

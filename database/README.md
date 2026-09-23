@@ -12,7 +12,7 @@ docker compose run --rm backend alembic -c database/alembic.ini current
 ```
 
 Migration scripts live in `database/migrations/`. The final migration head is
-`20260909_0019`.
+`20260924_0027`.
 
 `Device` stores logical identity. An immutable `Snapshot` is the complete
 evidence boundary for one device at one point in time; an `Artifact` can remain

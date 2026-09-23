@@ -117,6 +117,7 @@ def test_remediation_api_registry_preview_and_fail_closed_postgres(tmp_path):
         app.dependency_overrides[get_settings] = lambda: settings
         app.dependency_overrides[get_artifact_storage] = lambda: LocalFilesystemArtifactStorage(tmp_path / "artifacts")
         with TestClient(app) as client:
+            client.headers.update({"Origin": settings.frontend_origin})
             assert client.post("/api/v1/auth/login", json={"email": f"step9-{suffix}@example.invalid", "password": "test-only-password"}).status_code == 200
             get = client.get(f"/api/v1/findings/{finding_id}/remediation"); assert get.status_code == 200
             assert get.json()["procedure_id"] == str(procedure_id) and get.json()["selection_source"] == "published_registry_resolution"
@@ -276,6 +277,7 @@ def test_findings_read_api_preserves_canonical_values_and_fails_closed(tmp_path)
 
         application.dependency_overrides[get_db] = session_dependency
         with TestClient(application) as client:
+            client.headers.update({"Origin": settings.frontend_origin})
             assert client.post("/api/v1/auth/login", json={"email": f"step8-read-{suffix}@example.invalid", "password": "test-only-password"}).status_code == 200
             listing = client.get(f"/api/v1/audits/{audit_a_id}/findings")
             assert listing.status_code == 200

@@ -160,11 +160,6 @@ def validate_suggestion(suggestion: MappingSuggestion, profile: ProfileManifest)
         raise AISuggestionInvalid("Suggestion structural operation does not match the profile reader")
     if expected_operation is None and definition.structural_match.operation in {"xml_path", "json_path"}:
         raise AISuggestionInvalid("Suggestion structural operation does not match the profile reader")
-    if profile.structural_reader_name == "indentation_cli.v1":
-        required_families = {"positive", "alternate_values", "negative", "wrong_scope", "negation", "conflict", "regression"}
-        missing_families = sorted(required_families - {example.family for example in definition.examples})
-        if missing_families:
-            raise AISuggestionInvalid("CLI suggestion is missing executable validation examples: " + ", ".join(missing_families))
     return suggestion
 
 
@@ -296,8 +291,7 @@ def _validated_model_suggestion(data: Any, profile: ProfileManifest) -> tuple[Ma
         details = "; ".join(f"{'.'.join(str(part) for part in item['loc'])}: {item['type']}" for item in error.errors(include_input=False)[:8])[:512]
         raise _ProposalValidationError("The prior proposal violated schema or DSL constraints: " + details) from error
     except AISuggestionInvalid as error:
-        reason = str(error)[:512] or "The prior proposal violated reviewed-profile applicability or reader constraints"
-        raise _ProposalValidationError(reason) from error
+        raise _ProposalValidationError("The prior proposal violated reviewed-profile applicability or reader constraints") from error
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
         raise _ProposalValidationError("The prior response was not a valid schema-conforming JSON proposal") from error
 

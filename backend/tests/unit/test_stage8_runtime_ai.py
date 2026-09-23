@@ -58,19 +58,12 @@ def _profile(reader):
 
 
 def _definition(profile, reader):
-    cli_examples = [
-        {"family": family, "node": {"command": "stage8-ssh", "arguments": ["enable"], "negated": False}, "expected_match": True, "expected_value": True}
-        for family in ("positive", "alternate_values", "wrong_scope", "negation", "conflict")
-    ] + [
-        {"family": "negative", "node": {"command": "stage8-ssh", "arguments": ["disable"], "negated": False}, "expected_match": False},
-        {"family": "regression", "node": {"command": "other", "arguments": ["enable"], "negated": False}, "expected_match": False},
-    ]
     base = {
         "profile_applicability": {"profile_version_ids": [profile.profile_version_id]},
         "target_field_id": "management.remote.ssh.enabled",
         "unit_conversion": {"operation": "none"}, "scope_resolution": {"strategy": "device"},
         "negation_behavior": {"operation": "unsupported"}, "removal_behavior": {"operation": "unsupported"},
-        "default_behavior": {"operation": "unknown"}, "examples": cli_examples if reader == "indentation_cli.v1" else [],
+        "default_behavior": {"operation": "unknown"}, "examples": [],
     }
     if reader == "xml_tree.v1":
         return MappingDefinition.model_validate({**base,

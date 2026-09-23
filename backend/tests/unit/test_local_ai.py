@@ -71,21 +71,6 @@ def test_invalid_first_proposal_gets_one_corrective_retry(auth_settings):
     assert result.definition.profile_applicability.profile_version_ids == ["cisco.ios_xe.17@1.0.0"]
 
 
-def test_cli_proposal_without_executable_families_is_retried_and_rejected(auth_settings):
-    invalid = candidate().model_dump(mode="json", exclude={"provider_metadata", "similar_mapping_refs"})
-    invalid["definition"]["examples"] = []
-    calls = []
-
-    def respond(request):
-        calls.append(json.loads(request.content))
-        return httpx.Response(200, json={"done": True, "message": {"content": json.dumps(invalid)}})
-
-    with pytest.raises(AISuggestionInvalid):
-        suggest(provider(auth_settings, respond), context())
-    assert len(calls) == 2
-    assert "missing executable validation examples" in calls[1]["messages"][-1]["content"]
-
-
 def test_two_invalid_profile_proposals_fail_without_a_draft(auth_settings):
     invalid = candidate().model_dump(mode="json", exclude={"provider_metadata", "similar_mapping_refs"})
     invalid["definition"]["profile_applicability"] = {"profile_version_ids": ["juniper.junos.18@1.0.0"]}

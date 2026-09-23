@@ -337,6 +337,21 @@ def test_runtime_cli_ai_training_lifecycle(tmp_path, monkeypatch, real_ollama):
                 mapping_id = adopted.json()["mapping_version_id"]
                 assert client.post(f"/api/v1/training/mappings/{mapping_id}/approve").status_code == 409
                 assert client.post(f"/api/v1/training/mappings/{mapping_id}/publish").status_code == 409
+                # The model proposes the mapping; the administrator supplies the
+                # executable validation cases through the normal editable draft.
+                definition_for_validation = {name: adopted.json()[name] for name in (
+                    "profile_applicability", "structural_match", "target_field_id", "value_extraction",
+                    "unit_conversion", "scope_resolution", "negation_behavior", "removal_behavior", "default_behavior",
+                )}
+                definition_for_validation["examples"] = [
+                    {"family": family, "node": {"command": "secure-shell", "arguments": ["enable"], "negated": False}, "expected_match": True}
+                    for family in ("positive", "alternate_values", "wrong_scope", "negation", "conflict")
+                ] + [
+                    {"family": "negative", "node": {"command": "unrelated-command", "arguments": [], "negated": False}, "expected_match": False},
+                    {"family": "regression", "node": {"command": "unrelated-command", "arguments": [], "negated": False}, "expected_match": False},
+                ]
+                edited = client.put(f"/api/v1/training/mappings/{mapping_id}", json={"title": adopted.json()["title"], "description": adopted.json()["description"], "definition": definition_for_validation})
+                assert edited.status_code == 200, edited.text
                 queued = client.post(f"/api/v1/training/mappings/{mapping_id}/validate", json={"evidence_artifact_id": str(positive_id), "negative_evidence_artifact_id": str(negative_id)})
                 assert queued.status_code == 202, queued.text
             run_id = UUID(queued.json()["validation_run_id"])

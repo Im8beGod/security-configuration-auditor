@@ -15,5 +15,20 @@ export function RemediationPanel({ findingId }: { findingId: string }) {
 
   const item = preview.data ?? query.data
   const steps = item.rendered_steps ?? item.ordered_steps?.map((step) => step.text ?? '') ?? []
-  return <section className="panel page-stack"><div><span className="eyebrow">How to fix this</span><h2>{item.title}</h2><p>{item.security_objective}</p></div>{item.safety_warnings?.map((warning) => <p className="boundary-note" key={warning}>{warning}</p>)}{item.required_parameters?.length ? <form className="form-grid" onSubmit={(event) => { event.preventDefault(); preview.mutate() }}>{item.required_parameters.map((field) => <label className="field" key={field.name}>{field.label ?? field.name}<input required={field.required !== false} value={values[field.name] ?? ''} onChange={(event) => setValues({ ...values, [field.name]: event.target.value })} /></label>)}<button className="button-primary" disabled={preview.isPending}>Preview reviewed steps</button>{preview.isError && <p className="error-message" role="alert">Parameters could not be validated safely.</p>}</form> : null}{steps.map((step) => <pre className="evidence-excerpt" key={step}>{step}</pre>)}{item.verification_steps?.length ? <details><summary>Verify</summary>{item.verification_steps.map((step) => <pre className="evidence-excerpt" key={step.text}>{step.text}</pre>)}</details> : null}{item.rollback_steps?.length ? <details><summary>Rollback</summary>{item.rollback_steps.map((step) => <pre className="evidence-excerpt" key={step.text}>{step.text}</pre>)}</details> : null}<details><summary>Procedure provenance</summary><p>{item.procedure_key} · version {item.procedure_version} · {item.selection_source}</p></details></section>
+  const verificationSteps = item.rendered_verification_steps ?? item.verification_steps?.map((step) => step.text ?? '') ?? []
+  const rollbackSteps = item.rendered_rollback_steps ?? item.rollback_steps?.map((step) => step.text ?? '') ?? []
+
+  return <section className="panel page-stack">
+    <div><span className="eyebrow">How to fix this</span><h2>{item.title}</h2><p>{item.security_objective}</p></div>
+    {item.safety_warnings?.map((warning) => <p className="boundary-note" key={warning}>{warning}</p>)}
+    {item.required_parameters?.length ? <form className="form-grid" onSubmit={(event) => { event.preventDefault(); preview.mutate() }}>
+      {item.required_parameters.map((field) => <label className="field" key={field.name}>{field.label ?? field.name}<input required={field.required !== false} value={values[field.name] ?? ''} onChange={(event) => setValues({ ...values, [field.name]: event.target.value })} /></label>)}
+      <button className="button-primary" disabled={preview.isPending}>Preview reviewed steps</button>
+      {preview.isError && <p className="error-message" role="alert">Parameters could not be validated safely.</p>}
+    </form> : null}
+    {steps.map((step) => <pre className="evidence-excerpt" key={step}>{step}</pre>)}
+    {verificationSteps.length ? <details><summary>Verify</summary>{verificationSteps.map((step) => <pre className="evidence-excerpt" key={step}>{step}</pre>)}</details> : null}
+    {rollbackSteps.length ? <details><summary>Rollback</summary>{rollbackSteps.map((step) => <pre className="evidence-excerpt" key={step}>{step}</pre>)}</details> : null}
+    <details><summary>Procedure provenance</summary><p>{item.procedure_key} · version {item.procedure_version} · {item.selection_source}</p></details>
+  </section>
 }

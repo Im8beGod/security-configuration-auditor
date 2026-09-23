@@ -90,8 +90,8 @@ jobs:
           alembic -c ../database/alembic.ini upgrade head
           alembic -c ../database/alembic.ini downgrade 20260909_0020
           alembic -c ../database/alembic.ini upgrade head
-          alembic -c ../database/alembic.ini heads | grep -F "20260920_0023 (head)"
-          alembic -c ../database/alembic.ini current | grep -F "20260920_0023 (head)"
+          alembic -c ../database/alembic.ini heads | grep -F "20260922_0024 (head)"
+          alembic -c ../database/alembic.ini current | grep -F "20260922_0024 (head)"
 
       - name: Run tests
         run: python -m pytest -v

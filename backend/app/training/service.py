@@ -296,7 +296,13 @@ def impact_analysis(db: Session, user: User, mapping_version_id: UUID) -> dict[s
         raise TrainingConflict("Impact analysis requires a published mapping")
     definition = MappingDefinition.model_validate(_definition_payload(mapping))
     blocks = list(db.scalars(select(UnresolvedBlock).where(UnresolvedBlock.organization_id == user.organization_id)))
-    matched = [block for block in blocks if _block_matches(definition, block)]
+    matched_by_id = {
+        block.unresolved_block_id: block
+        for block in blocks
+        if block.assigned_mapping_version_id == mapping_version_id
+        or _block_matches(definition, block)
+    }
+    matched = list(matched_by_id.values())
     audit_ids = sorted({block.audit_id for block in matched}, key=str)
     device_ids = sorted({block.device_id for block in matched}, key=str)
     unknown_count = db.scalar(select(func.count(Finding.finding_id)).where(Finding.audit_id.in_(audit_ids), Finding.verdict == FindingVerdict.UNKNOWN)) if audit_ids else 0

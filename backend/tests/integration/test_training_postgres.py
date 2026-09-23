@@ -69,6 +69,9 @@ def test_learning_lifecycle_is_tenant_scoped_immutable_and_never_revises_audits(
             audit = Audit(organization_id=organization_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, revision_number=1, reevaluation_reason=AuditReevaluationReason.INITIAL, status=AuditStatus.COMPLETED_WITH_UNKNOWNS, selected_frameworks=[], version_refs={"knowledge_pack_version_id": "sealed-pack", "device_profile_version_id": "cisco.ios_xe.17@1.0.0"}, profile_resolution={"profile_version_id": "cisco.ios_xe.17@1.0.0"}, verdict_counts={"unknown": 1}, severity_counts={}, coverage={}, created_by=admin_id)
             db.add(audit); db.flush()
             block = UnresolvedBlock(organization_id=organization_id, audit_id=audit.audit_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, profile_id="cisco.ios_xe.17", profile_version_id="cisco.ios_xe.17@1.0.0", source_ir_node_ids=["node-1"], evidence_refs=[{"artifact_id": str(uuid4()), "start_line": 2, "end_line": 2}], raw_text="exec-timeout 5 0", surrounding_context="line vty 0 4\n exec-timeout 5 0", unknown_reason="unmapped_syntax", candidate_field_ids=["management.session.idle_timeout"], affected_rule_ids=["rule.unknown"], fingerprint=sha256(f"{audit.audit_id}:node-1".encode()).hexdigest(), occurrence={"command": "exec-timeout", "arguments": ["5", "0"], "parent_command": "line", "scope_type": "vty_range"})
+            # Deliberately incomplete historical occurrence metadata: impact
+            # analysis must still honor the explicit mapping assignment.
+            block.occurrence = {"raw_text": "exec-timeout 5 0"}
             db.add(block)
             finding = Finding(finding_id=uuid4(), audit_id=audit.audit_id, device_id=device.device_id, comparison_key="unknown", rule_id="rule.unknown", rule_pack_version_id=uuid4(), title="Unknown", security_domain="management", verdict=FindingVerdict.UNKNOWN, severity=FindingSeverity.MEDIUM, expected_state={}, observed_state=None, explanation="Persisted unknown", affected_scope=None, effective_state_refs=[], evidence_refs=[], unknown_reason="missing_evidence", framework_references=[], remediation_procedure_id=None)
             db.add(finding)
@@ -133,6 +136,9 @@ def test_learning_lifecycle_is_tenant_scoped_immutable_and_never_revises_audits(
                 publish_mapping(db, admin, failed_mapping.mapping_version_id)
             assert reject_mapping(db, admin, failed_mapping.mapping_version_id).status == MappingStatus.REJECTED
             impact = impact_analysis(db, admin, published.mapping_version_id)
+            assert impact["matching_unresolved_block_ids"] == [block_id]
+            assert impact["affected_device_ids"] == [device.device_id]
+            assert impact["affected_historical_audit_ids"] == [audit_id]
             assert impact["potentially_affected_unknown_findings"] == 1
             assert impact["creates_audit_revision"] is False
             assert db.scalar(select(func.count(Audit.audit_id)).where(Audit.snapshot_id == db.get(Audit, audit_id).snapshot_id)) == 1

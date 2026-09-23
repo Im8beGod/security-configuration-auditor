@@ -2,11 +2,12 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app.db.models import MappingOrigin, MappingStatus, UnresolvedReviewStatus, UserRole
 from app.profile_resolution.runtime import parse_runtime_profile
-from app.training.ai import AISuggestionInvalid, MappingSuggestion, build_prompt
+from app.training.ai import AISuggestionInvalid, MappingSuggestion, OllamaSuggestionProvider, build_prompt
 from app.training.dsl import MappingDefinition
 from app.training.service import TrainingError, adopt_suggestion, suggest_mapping
 
@@ -142,6 +143,7 @@ def test_invalid_ai_output_and_profile_mismatch_are_rejected(monkeypatch):
     mismatch = Provider(MappingSuggestion(definition=_definition(other, "json_tree.v1"), description="wrong profile", confidence=0.5))
     with pytest.raises(AISuggestionInvalid):
         suggest_mapping(db, user, block.unresolved_block_id, mismatch, "stage8-signing-key")
+    assert not db.added and not db.committed
 
 
 def test_another_tenants_runtime_profile_is_inaccessible(monkeypatch):
@@ -153,3 +155,25 @@ def test_another_tenants_runtime_profile_is_inaccessible(monkeypatch):
 
     with pytest.raises(TrainingError, match="Resolved profile"):
         suggest_mapping(db, other, block.unresolved_block_id, provider, "stage8-signing-key")
+
+
+def test_two_invalid_ollama_proposals_create_no_runtime_draft(monkeypatch, auth_settings):
+    profile, user = _profile("indentation_cli.v1"), _user()
+    block, db = _block(profile), Db(None)
+    other = _profile("json_tree.v1")
+    invalid = MappingSuggestion(definition=_definition(other, "json_tree.v1"), description="wrong profile", confidence=0.5)
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json={"done": True, "message": {"content": json.dumps(invalid.model_dump(mode="json", exclude={"provider_metadata", "similar_mapping_refs"}))}})
+
+    monkeypatch.setattr("app.training.service.get_unresolved", lambda *_args: block)
+    monkeypatch.setattr("app.training.service.profile_for", lambda *_args: profile)
+    provider = OllamaSuggestionProvider(auth_settings, httpx.MockTransport(respond))
+
+    with pytest.raises(AISuggestionInvalid):
+        suggest_mapping(db, user, block.unresolved_block_id, provider, "stage8-signing-key")
+
+    assert len(calls) == 2
+    assert not db.added and not db.committed

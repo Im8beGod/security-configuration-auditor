@@ -31,7 +31,9 @@ def suggest(instance, ctx):
 
 
 def test_real_http_contract_is_bounded_and_metadata_is_server_owned(auth_settings):
+    calls = []
     def respond(request):
+        calls.append(request)
         assert request.url.path == "/api/chat"
         data = json.loads(request.content)
         assert data["stream"] is False and isinstance(data["format"], dict)
@@ -41,6 +43,48 @@ def test_real_http_contract_is_bounded_and_metadata_is_server_owned(auth_setting
     result = suggest(provider(auth_settings, respond), context())
     assert result.provider_metadata["provider"] == "ollama"
     assert result.provider_metadata["model"] == auth_settings.ai_ollama_model
+    assert result.provider_metadata["attempt_count"] == "1"
+    assert result.provider_metadata["correction_attempted"] == "false"
+    assert len(calls) == 1
+
+
+def test_invalid_first_proposal_gets_one_corrective_retry(auth_settings):
+    invalid = candidate().model_dump(mode="json", exclude={"provider_metadata", "similar_mapping_refs"})
+    invalid["definition"]["profile_applicability"] = {"profile_version_ids": ["juniper.junos.18@1.0.0"]}
+    valid = candidate().model_dump(mode="json", exclude={"provider_metadata", "similar_mapping_refs"})
+    calls = []
+
+    def respond(request):
+        calls.append(json.loads(request.content))
+        proposal = invalid if len(calls) == 1 else valid
+        return httpx.Response(200, json={"done": True, "message": {"content": json.dumps(proposal)}})
+
+    result = suggest(provider(auth_settings, respond), context())
+
+    assert len(calls) == 2
+    assert calls[0]["format"] == calls[1]["format"]
+    assert calls[0]["messages"][1] == calls[1]["messages"][1]
+    assert "previous proposal was rejected" in calls[1]["messages"][-1]["content"]
+    assert "sensitive" not in json.dumps(calls[1])
+    assert result.provider_metadata["attempt_count"] == "2"
+    assert result.provider_metadata["correction_attempted"] == "true"
+    assert result.definition.profile_applicability.profile_version_ids == ["cisco.ios_xe.17@1.0.0"]
+
+
+def test_two_invalid_profile_proposals_fail_without_a_draft(auth_settings):
+    invalid = candidate().model_dump(mode="json", exclude={"provider_metadata", "similar_mapping_refs"})
+    invalid["definition"]["profile_applicability"] = {"profile_version_ids": ["juniper.junos.18@1.0.0"]}
+    calls = []
+
+    def respond(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"done": True, "message": {"content": json.dumps(invalid)}})
+
+    with pytest.raises(AISuggestionInvalid):
+        suggest(provider(auth_settings, respond), context())
+
+    assert len(calls) == 2
+    assert all(json.loads(call["messages"][1]["content"])["profile"]["version"] == "cisco.ios_xe.17@1.0.0" for call in calls)
 
 
 @pytest.mark.parametrize("body", [

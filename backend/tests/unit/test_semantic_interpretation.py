@@ -249,6 +249,32 @@ def test_unresolved_mapping_evidence_persists_affected_rule_ids():
     assert timeout.affected_rule_ids == ["management.idle_timeout.maximum"]
 
 
+def test_unmatched_configuration_evidence_persists_global_profile_uncertainty():
+    ir, result = _interpret("future-feature enable\n")
+
+    class Db:
+        def __init__(self): self.added = []
+        def scalar(self, _statement): return None
+        def add(self, value): self.added.append(value)
+
+    db = Db()
+    _persist_unresolved_blocks(
+        db, organization_id=UUID(int=505),
+        context=InterpretationContext(AUDIT_ID, DEVICE_ID, SNAPSHOT_ID),
+        profile_id=CISCO_IOS_XE_17.profile_id,
+        profile_version_id=CISCO_IOS_XE_17.profile_version_id,
+        parsed_irs=[ir], results=[result],
+        knowledge_pack=load_validated_knowledge_pack(CISCO_IOS_XE_17.profile_version_id),
+        unsupported_artifacts=[],
+    )
+
+    block = db.added[0]
+    assert block.candidate_field_ids == sorted({
+        field_id for rule in RULE_PACK.rules for field_id in rule.required_effective_states
+    })
+    assert block.affected_rule_ids == sorted(rule.rule_id for rule in RULE_PACK.rules)
+
+
 def test_unsupported_configuration_artifact_persists_global_uncertainty():
     class Db:
         def __init__(self):

@@ -11,7 +11,11 @@ from app.compliance.models import (
     deterministic_finding_id, deterministic_policy_version_id,
 )
 from app.compliance.policy import OrganizationPolicyRegistry, PolicyRegistryError
-from app.compliance.rule_registry import FORTIOS_RULE_PACK, JUNOS_RULE_PACK, RULE_PACK, RuleRegistry, RuleRegistryError
+from app.compliance.rule_registry import (
+    ARISTA_RULE_PACK, FORTIOS_RULE_PACK, GENERIC_JSON_RULE_PACK,
+    GENERIC_RULE_PACK, GENERIC_XML_RULE_PACK, JUNOS_RULE_PACK, RULE_PACK,
+    RuleRegistry, RuleRegistryError,
+)
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import AuditStatus
 from app.effective_state import UnresolvedReason
@@ -180,6 +184,68 @@ def test_affected_unresolved_evidence_prevents_a_compliant_finding():
     assert finding.verdict is FindingVerdict.UNKNOWN
     assert finding.unknown_reason is UnresolvedReason.UNSUPPORTED_FEATURE
     assert finding.evidence_refs == tuple(block.evidence_refs)
+
+
+@pytest.mark.parametrize("rule_pack", (
+    RULE_PACK, FORTIOS_RULE_PACK, JUNOS_RULE_PACK, ARISTA_RULE_PACK,
+    GENERIC_RULE_PACK, GENERIC_XML_RULE_PACK, GENERIC_JSON_RULE_PACK,
+))
+def test_unassociated_configuration_uncertainty_prevents_pass_for_every_profile(rule_pack):
+    from app.compliance.service import evaluate_audit_compliance
+    from app.effective_state import ResolutionStatus
+
+    audit = SimpleNamespace(
+        audit_id=UUID(int=30), device_id=UUID(int=31), status=AuditStatus.PROCESSING,
+        profile_resolution={"resolution_status": "resolved", "profile_version_id": rule_pack.profile_version_id},
+    )
+    state = SimpleNamespace(
+        effective_state_id=UUID(int=32), device_id=audit.device_id,
+        field_id="management.remote.ssh.enabled",
+        scope={"type": "device", "key": "device", "attributes": {}},
+        resolution_status=ResolutionStatus.RESOLVED,
+        effective_value=_value("boolean", True), unresolved_reason=None,
+    )
+    block = SimpleNamespace(
+        audit_id=audit.audit_id, profile_version_id=rule_pack.profile_version_id,
+        source_ir_node_ids=["unknown-command"], candidate_field_ids=[],
+        affected_rule_ids=[], evidence_refs=[{"evidence_type": "configuration"}],
+    )
+    drafts = evaluate_audit_compliance(
+        SimpleNamespace(scalar=lambda _statement: audit), audit_id=audit.audit_id,
+        organization_id=UUID(int=33), rule_pack=rule_pack, organization_policy=None,
+        effective_states=(state,), unresolved_blocks=(block,),
+    )
+
+    assert next(item for item in drafts if item.rule_id == "management.ssh.enabled").verdict is FindingVerdict.UNKNOWN
+
+
+def test_irrelevant_comment_uncertainty_does_not_prevent_pass():
+    from app.compliance.service import evaluate_audit_compliance
+    from app.effective_state import ResolutionStatus
+
+    audit = SimpleNamespace(
+        audit_id=UUID(int=34), device_id=UUID(int=35), status=AuditStatus.PROCESSING,
+        profile_resolution={"resolution_status": "resolved", "profile_version_id": RULE_PACK.profile_version_id},
+    )
+    state = SimpleNamespace(
+        effective_state_id=UUID(int=36), device_id=audit.device_id,
+        field_id="management.remote.ssh.enabled",
+        scope={"type": "device", "key": "device", "attributes": {}},
+        resolution_status=ResolutionStatus.RESOLVED,
+        effective_value=_value("boolean", True), unresolved_reason=None,
+    )
+    comment = SimpleNamespace(
+        audit_id=audit.audit_id, profile_version_id=RULE_PACK.profile_version_id,
+        source_ir_node_ids=[], candidate_field_ids=[], affected_rule_ids=[],
+        evidence_refs=[{"evidence_type": "comment"}],
+    )
+    drafts = evaluate_audit_compliance(
+        SimpleNamespace(scalar=lambda _statement: audit), audit_id=audit.audit_id,
+        organization_id=UUID(int=37), rule_pack=RULE_PACK, organization_policy=None,
+        effective_states=(state,), unresolved_blocks=(comment,),
+    )
+
+    assert next(item for item in drafts if item.rule_id == "management.ssh.enabled").verdict is FindingVerdict.PASS
 
 
 def test_unsupported_operator_and_typed_value_fail_closed():

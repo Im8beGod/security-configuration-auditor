@@ -116,7 +116,20 @@ def evaluate_audit_compliance(
     for block in unresolved_blocks:
         if block.audit_id != audit.audit_id:
             raise ComplianceError("Unresolved evidence crosses the Audit boundary")
-        for rule_id in block.affected_rule_ids:
+        affected_rule_ids = set(block.affected_rule_ids)
+        candidate_field_ids = set(getattr(block, "candidate_field_ids", ()))
+        # Preserve fail-closed behavior for historical blocks produced before
+        # unresolved configuration nodes were associated with profile rules.
+        # Comments have no source IR node and are never treated as configuration
+        # uncertainty here.
+        if (
+            not affected_rule_ids
+            and not candidate_field_ids
+            and getattr(block, "profile_version_id", None) == rule_pack.profile_version_id
+            and getattr(block, "source_ir_node_ids", ())
+        ):
+            affected_rule_ids = {rule.rule_id for rule in rule_pack.rules}
+        for rule_id in affected_rule_ids:
             unresolved_by_rule[rule_id].append(block)
     drafts: list[FindingDraft] = []
     for rule in rule_pack.rules:

@@ -1125,6 +1125,12 @@ def _persist_unresolved_blocks(
                 rule.rule_id for rule in rules
                 if set(rule.required_effective_states) & set(candidate_field_ids)
             })
+            # An unmatched configuration node has no safely determined canonical
+            # relevance.  It must therefore block PASS for this profile rather
+            # than leave an unassociated uncertainty behind.
+            if not candidate_field_ids:
+                candidate_field_ids = all_field_ids
+                affected_rule_ids = all_rule_ids
             if profile_id in {"generic.cli", "generic.xml", "generic.json"}:
                 candidate_field_ids = all_field_ids
                 affected_rule_ids = all_rule_ids

@@ -146,7 +146,20 @@ def runtime_profiles(db: Session, organization_id: UUID) -> tuple[ProfileManifes
 
 
 def profile_for(db: Session, organization_id: UUID, profile_version_id: str) -> ProfileManifest | None:
-    return PROFILE_REGISTRY.get(profile_version_id) or next((item for item in runtime_profiles(db, organization_id) if item.profile_version_id == profile_version_id), None)
+    row = db.scalar(select(ProfileManifestVersion).where(
+        ProfileManifestVersion.organization_id == organization_id,
+        ProfileManifestVersion.profile_version_id == profile_version_id,
+    ))
+    if row is not None:
+        if row.status != "published":
+            raise RuntimeProfileError("Profile version is not published")
+        if PROFILE_REGISTRY.get(profile_version_id) is not None:
+            raise RuntimeProfileError("Profile version conflicts with a built-in profile")
+        try:
+            return parse_runtime_profile(json.dumps(row.manifest, sort_keys=True).encode())
+        except RuntimeProfileError as exc:
+            raise RuntimeProfileError("Published profile manifest is invalid") from exc
+    return PROFILE_REGISTRY.get(profile_version_id)
 
 
 def publish_runtime_profile(db: Session, organization_id: UUID, profile: ProfileManifest, manifest: dict[str, Any]) -> ProfileManifestVersion:

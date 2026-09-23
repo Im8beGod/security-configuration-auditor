@@ -7,7 +7,7 @@ from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AssessmentObligation, AssessmentPackVersion
 from app.compliance.rule_registry import RULE_PACK_BY_PROFILE
 from app.profile_resolution import PROFILE_REGISTRY
+from app.profile_resolution.runtime import RuntimeProfileError, profile_for
 
 
 CATALOG_DIRECTORY = Path(__file__).resolve().parent
@@ -207,11 +208,11 @@ def _runtime_text(value: Any, label: str, *, limit: int) -> str:
     return normalized
 
 
-def _runtime_profiles(value: Any, *, allowed: set[str] | None = None) -> tuple[str, ...]:
+def _runtime_profiles(value: Any, *, profile_lookup: Callable[[str], object | None], allowed: set[str] | None = None) -> tuple[str, ...]:
     if not isinstance(value, list) or not value or len(value) > 32:
         raise CatalogImportError("Runtime catalog profile applicability is invalid")
     profiles = tuple(dict.fromkeys(_runtime_text(item, "profile", limit=255) for item in value))
-    if any(PROFILE_REGISTRY.get(item) is None for item in profiles):
+    if any(profile_lookup(item) is None for item in profiles):
         raise CatalogImportError("Runtime catalog references an unsupported profile")
     if allowed is not None and not set(profiles).issubset(allowed):
         raise CatalogImportError("Runtime obligation applicability exceeds the pack profiles")
@@ -270,7 +271,10 @@ def _runtime_policy(value: Any, rule: Any) -> dict[str, Any]:
     return policy
 
 
-def parse_runtime_catalog(content: bytes, filename: str) -> RuntimeCatalog:
+def parse_runtime_catalog(
+    content: bytes, filename: str, *,
+    profile_lookup: Callable[[str], object | None] = PROFILE_REGISTRY.get,
+) -> RuntimeCatalog:
     """Validate the bounded JSON schema used for tenant-published assessment packs."""
     if not content or len(content) > MAX_EXTERNAL_CATALOG_BYTES:
         raise CatalogImportError("Runtime catalog file size is invalid")
@@ -290,7 +294,10 @@ def parse_runtime_catalog(content: bytes, filename: str) -> RuntimeCatalog:
     version = payload.get("version")
     if isinstance(version, bool) or not isinstance(version, int) or version < 1 or not source_url.startswith("https://"):
         raise CatalogImportError("Runtime catalog identity or provenance is invalid")
-    profiles = _runtime_profiles(payload.get("profile_version_ids"))
+    try:
+        profiles = _runtime_profiles(payload.get("profile_version_ids"), profile_lookup=profile_lookup)
+    except RuntimeProfileError as exc:
+        raise CatalogImportError("Runtime catalog references an unsupported profile") from exc
     raw_obligations = payload.get("obligations")
     if not isinstance(raw_obligations, list) or not raw_obligations or len(raw_obligations) > MAX_EXTERNAL_CONTROLS:
         raise CatalogImportError("Runtime catalog must contain bounded obligations")
@@ -308,7 +315,13 @@ def parse_runtime_catalog(content: bytes, filename: str) -> RuntimeCatalog:
         implementation = _runtime_text(item.get("implementation_status"), "implementation status", limit=16).lower()
         if method not in {"automatic", "manual"} or implementation not in {"implemented", "manual", "unimplemented"}:
             raise CatalogImportError("Runtime obligation assessment status is invalid")
-        applicable_profiles = _runtime_profiles(item.get("profile_version_ids", list(profiles)), allowed=set(profiles))
+        try:
+            applicable_profiles = _runtime_profiles(
+                item.get("profile_version_ids", list(profiles)),
+                profile_lookup=profile_lookup, allowed=set(profiles),
+            )
+        except RuntimeProfileError as exc:
+            raise CatalogImportError("Runtime catalog references an unsupported profile") from exc
         evaluator = item.get("evaluator_rule_id")
         if method == "automatic" and implementation == "implemented":
             evaluator = _runtime_text(evaluator, "evaluator rule ID", limit=255)
@@ -356,6 +369,11 @@ def runtime_catalog_preview(catalog: RuntimeCatalog) -> dict[str, Any]:
 
 
 def publish_runtime_catalog(db: Session, organization_id: UUID, catalog: RuntimeCatalog, filename: str) -> AssessmentPackVersion:
+    try:
+        if any(profile_for(db, organization_id, profile_id) is None for profile_id in catalog.profile_version_ids):
+            raise CatalogImportError("Runtime catalog references an unsupported profile")
+    except RuntimeProfileError as exc:
+        raise CatalogImportError("Runtime catalog references an unsupported profile") from exc
     existing = db.scalar(select(AssessmentPackVersion.assessment_pack_version_id).where(
         AssessmentPackVersion.organization_id == organization_id,
         AssessmentPackVersion.pack_key == catalog.pack_key,

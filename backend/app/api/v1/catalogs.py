@@ -11,25 +11,27 @@ from app.assessment_packs.catalog import (
 from app.auth.dependencies import require_roles
 from app.db.models import User, UserRole
 from app.db.session import get_db
+from app.profile_resolution.runtime import profile_for
 
 
 router = APIRouter(prefix="/assessment-packs", tags=["assessment-packs"])
 CatalogAdmin = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
 
 
-async def _runtime_catalog(file: UploadFile):
+async def _runtime_catalog(file: UploadFile, db: Session, organization_id):
     return parse_runtime_catalog(
         await file.read(MAX_EXTERNAL_CATALOG_BYTES + 1), file.filename or "assessment-pack.json",
+        profile_lookup=lambda profile_version_id: profile_for(db, organization_id, profile_version_id),
     )
 
 
 @router.post("/preview")
 async def preview_runtime_catalog(
     file: Annotated[UploadFile, File(...)], user: CatalogAdmin,
+    db: Annotated[Session, Depends(get_db)],
 ):
-    del user
     try:
-        return runtime_catalog_preview(await _runtime_catalog(file))
+        return runtime_catalog_preview(await _runtime_catalog(file, db, user.organization_id))
     except CatalogImportError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -42,7 +44,7 @@ async def publish_runtime_catalog_endpoint(
     db: Annotated[Session, Depends(get_db)],
 ):
     try:
-        catalog = await _runtime_catalog(file)
+        catalog = await _runtime_catalog(file, db, user.organization_id)
         if preview_digest != catalog.source_digest:
             raise CatalogImportError("Published catalog does not match the validated preview")
         pack = publish_runtime_catalog(db, user.organization_id, catalog, file.filename or "assessment-pack.json")

@@ -28,6 +28,7 @@ from app.profile_resolution import (
     resolve_profile,
 )
 from app.profile_resolution.evidence import EvidenceDocument
+from app.profile_resolution.runtime import RuntimeProfileError, profile_for
 from app.interpretation.service import load_validated_knowledge_pack
 
 
@@ -134,6 +135,22 @@ def test_declared_canonical_coverage_matches_active_semantic_mappings(profile):
     assert mapping_fields <= declared_fields
     assert declared_fields - mapping_fields == set(justified)
     assert all(isinstance(reason, str) and reason for reason in justified.values())
+
+
+def test_profile_lookup_rejects_unpublished_invalid_and_builtin_conflicts():
+    class Db:
+        def __init__(self, row): self.row = row
+        def scalar(self, _statement): return self.row
+
+    unpublished = type("Row", (), {"status": "retired", "manifest": {}})()
+    with pytest.raises(RuntimeProfileError, match="not published"):
+        profile_for(Db(unpublished), UUID(int=1), "runtime.acme@1.0.0")
+    invalid = type("Row", (), {"status": "published", "manifest": {}})()
+    with pytest.raises(RuntimeProfileError, match="invalid"):
+        profile_for(Db(invalid), UUID(int=1), "runtime.acme@1.0.0")
+    conflict = type("Row", (), {"status": "published", "manifest": {}})()
+    with pytest.raises(RuntimeProfileError, match="conflicts"):
+        profile_for(Db(conflict), UUID(int=1), CISCO_IOS_XE_17.profile_version_id)
 
 
 def test_fortios_status_identity_includes_hostname_model_serial_and_build():

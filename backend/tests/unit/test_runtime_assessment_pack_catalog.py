@@ -62,3 +62,24 @@ def test_runtime_catalog_rejects_unbound_or_dishonest_obligations(mutate):
     mutate(payload)
     with pytest.raises(CatalogImportError):
         parse_runtime_catalog(json.dumps(payload).encode(), "customer.json")
+
+
+def test_runtime_catalog_uses_tenant_scoped_profile_lookup():
+    profile_version_id = "runtime.acme.1@1.0.0"
+    payload = json.loads(_payload(
+        profile_version_ids=[profile_version_id],
+        obligations=[{
+            "obligation_key": "CUSTOM-MANUAL-1", "control_id": "CUSTOM-MANUAL-1",
+            "title": "Manual", "severity": "not_assigned", "scope": "organization",
+            "assessment_method": "manual", "implementation_status": "manual",
+        }],
+    ))
+
+    catalog = parse_runtime_catalog(
+        json.dumps(payload).encode(), "runtime.json",
+        profile_lookup=lambda value: object() if value == profile_version_id else None,
+    )
+
+    assert catalog.profile_version_ids == (profile_version_id,)
+    with pytest.raises(CatalogImportError, match="unsupported profile"):
+        parse_runtime_catalog(json.dumps(payload).encode(), "runtime.json", profile_lookup=lambda _value: None)

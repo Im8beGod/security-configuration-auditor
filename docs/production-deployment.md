@@ -31,7 +31,7 @@ docker compose --env-file /etc/sih26155/production.env \
 
 The `migrate` command is an explicit one-time release step that runs
 `alembic upgrade head`; backend and worker never migrate on startup. Confirm
-the revision is `20260920_0023` with:
+the revision is `20260924_0027` with:
 
 ```sh
 docker compose --env-file /etc/sih26155/production.env \

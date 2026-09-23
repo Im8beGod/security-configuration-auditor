@@ -32,6 +32,7 @@ Job status every five seconds while active.
 
 Draft Snapshot membership is editable. A ready Snapshot can create an Audit, and
 running that Audit locks the Snapshot; new evidence then requires a new Snapshot.
-The current worker intentionally leaves `audit` Jobs queued until Step 5 provides
-real processing. The frontend does not simulate progress or display vendor,
-compliance, finding, remediation, or report results.
+The worker reports real processing state. The frontend displays persisted
+vendor, compliance, finding, remediation, and report results; server-side
+authorization remains authoritative. Admin users also have a guarded Runtime
+publishing page for profile, rule, and assessment-pack preview/publication.

@@ -6,7 +6,7 @@ import { AuditDetailPage } from '../../features/audits/AuditDetailPage'
 import { LoginPage } from '../../features/auth/LoginPage'
 import { RequireAuth } from '../../features/auth/RequireAuth'
 import { RequireRole } from '../../features/auth/RequireRole'
-import { TRAINING_ROLES } from '../../features/auth/roles'
+import { ADMIN_ROLES, TRAINING_ROLES } from '../../features/auth/roles'
 import { DashboardPage } from '../../features/dashboard/DashboardPage'
 import { DevicesPage } from '../../features/devices/DevicesPage'
 import { DeviceDetailPage } from '../../features/devices/DeviceDetailPage'
@@ -18,6 +18,7 @@ import { TrainingPage } from '../../features/training/TrainingPage'
 import { UnresolvedDetailPage } from '../../features/training/UnresolvedDetailPage'
 import { MappingEditorPage } from '../../features/training/MappingEditorPage'
 import { UploadsPage } from '../../features/uploads/UploadsPage'
+import { RuntimeAdminPage } from '../../features/runtime/RuntimeAdminPage'
 import { NotFoundPage } from '../../shared/components/NotFoundPage'
 
 export const router = createBrowserRouter([
@@ -39,6 +40,10 @@ export const router = createBrowserRouter([
           { path: '/findings', element: <FindingsPage /> },
           { path: '/findings/:findingId', element: <FindingDetailPage /> },
           { path: '/reports', element: <ReportsPage /> },
+          {
+            element: <RequireRole allowedRoles={ADMIN_ROLES} />,
+            children: [{ path: '/admin/runtime', element: <RuntimeAdminPage /> }],
+          },
           {
             element: <RequireRole allowedRoles={TRAINING_ROLES} />,
             children: [

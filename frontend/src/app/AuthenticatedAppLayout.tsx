@@ -49,6 +49,7 @@ export function AuthenticatedAppLayout() {
                 <NavLink to="/training">Training</NavLink>
               </li>
             )}
+            {currentUser.role === 'admin' && <li className="nav-advanced"><NavLink to="/admin/runtime">Runtime publishing</NavLink></li>}
           </ul>
         </nav>
 

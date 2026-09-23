@@ -5,7 +5,8 @@
 - Network configuration evidence is fragmented across vendors and devices.
 - Raw syntax is not the same as effective security state.
 - SIH 26155 preserves evidence and produces deterministic, reviewable findings.
-- Cisco IOS XE 17.x and FortiOS 7.x converge into shared security semantics.
+- Cisco IOS XE 17.x, FortiOS 7.x, Junos 18.x, and Arista EOS 4.x converge into
+  shared security semantics.
 
 Suggested visual: two configuration panels flowing into one trusted findings
 panel.
@@ -31,8 +32,9 @@ evidence preserves vendor syntax.
 - Deterministic PASS/FAIL/UNKNOWN evaluation.
 - Supervised learning loop with validation and administrator approval.
 - Immutable Knowledge Packs and historical re-evaluation revisions.
-- Cisco and FortiOS support in one vendor-neutral model.
+- Four bounded built-in vendor profiles plus tenant-scoped runtime profiles.
 - Mapped to selected NIST SP 800-53 Rev. 5 controls.
+- Scoped CIS, DISA SRG, and ISO/IEC 27001 technical-alignment packs.
 
 Suggested visual: shield-shaped trust model around evidence, mappings, and
 historical revisions.
@@ -41,27 +43,28 @@ Speaker note: AI suggestions are advisory and never determine compliance.
 
 ## Slide 4: Demo, Results, and Security Guarantees
 
-- Submit Cisco and FortiOS devices in one stateless batch with per-device jobs.
+- Submit four built-in vendor devices in one batch with per-device jobs.
 - Review findings, severity, evidence, and selected NIST mappings.
 - Generate PDF reports with device identity and hardware details.
-- Preview reviewed Cisco remediation procedures without command execution.
+- Preview reviewed or explicitly unavailable vendor-specific remediation without command execution.
 - Tenant isolation and immutable evidence protect audit history.
 
 Suggested visual: batch result list beside a finding and PDF report excerpt.
 
-Speaker note: FortiOS remediation remains unavailable pending reviewed
-procedure publication.
+Speaker note: remediation is profile-specific; unavailable combinations are
+shown as unavailable rather than receiving generic commands.
 
 ## Slide 5: Impact, Scalability, Roadmap, and Close
 
 - Independent device jobs provide a narrow path to larger fleet workflows.
 - Persistent evidence and reports support repeatable review and audit trails.
-- Current scope is Cisco IOS XE 17.x, FortiOS 7.x, and selected NIST mappings.
+- Current scope is four built-in vendor profiles, runtime no-redeploy
+  extensibility, and scoped CIS/NIST/DISA/ISO technical coverage.
 - Future work can add reviewed vendors, frameworks, and remediation catalogs.
 - Close: deterministic, traceable compliance evidence without overclaiming.
 
 Suggested visual: current bounded scope on the left and a clearly labeled
 future expansion path on the right.
 
-Speaker note: CIS, DISA STIG, and ISO mapping packs are not currently
-implemented; no claim of NIST compliance or certification is made.
+Speaker note: real Ollama acceptance is optional/manual; AI remains advisory.
+No claim of full-framework compliance or certification is made.

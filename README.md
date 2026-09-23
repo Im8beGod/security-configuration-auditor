@@ -21,8 +21,8 @@ Evidence upload -> Device -> immutable Snapshot -> profile detection
 -> reviewed remediation guidance -> PDF report -> Fleet Dashboard
 ```
 
-The advanced extension uses a declarative `ProfileManifest`, a generic XML
-structural reader, low-code mappings, executable validation, human approval,
+The advanced extension uses declarative runtime profiles for the registered
+CLI/XML/JSON readers, low-code mappings, executable validation, human approval,
 and immutable Knowledge Packs so future audits can reuse reviewed knowledge.
 
 ## Architecture and trust boundary
@@ -64,6 +64,7 @@ technical alignment only.
 - Reviewed, preview-only remediation guidance across Cisco, FortiOS, Junos, and Arista
 - PDF reporting and a fleet dashboard
 - Low-code mapping, validation, approval, immutable Knowledge Packs, and historical re-evaluation
+- Admin-only runtime publishing for profiles, safe automatic rules, and assessment packs
 
 ## AI safety boundary
 
@@ -142,7 +143,7 @@ coverage, universal compliance, or ISO conformity assessment.
 
 ## Migration and verification
 
-The final Alembic head is `20260920_0023`. The backend and worker never apply
+The final Alembic head is `20260924_0027`. The backend and worker never apply
 migrations automatically.
 
 ```powershell

@@ -24,6 +24,10 @@ second audit pipeline.
 - FortiOS 7.x uses `fortios_cli.v1`.
 - Juniper Junos 18.x XML onboarding uses the generic XML structural reader and
   declarative ProfileManifest mappings.
+- Arista EOS 4.x uses the registered CLI reader and profile-scoped mappings.
+- Runtime profiles can use the registered CLI, XML, or JSON readers without
+  source-registry changes; their mappings and packs remain tenant-scoped and
+  immutable after publication.
 - All prototype-supported profiles converge into shared canonical semantics,
   EffectiveState, and the deterministic compliance engine.
 - Vendor-specific syntax remains in evidence and provenance; verdict semantics
@@ -78,6 +82,7 @@ through NIST OLIR. These are not claims of certification, full framework
 coverage, universal compliance, CIS-CAT equivalence, or ISO conformity
 assessment.
 
-Remediation is reviewed, profile-scoped guidance across Cisco, FortiOS, and
-Junos. It is preview-only: commands are never executed automatically. Vendor
-and version coverage remains intentionally bounded.
+Remediation is reviewed, profile-scoped guidance across Cisco, FortiOS, Junos,
+and Arista where procedures are available; unsupported combinations remain
+explicitly unavailable. It is preview-only: commands are never executed
+automatically. Vendor and version coverage remains intentionally bounded.

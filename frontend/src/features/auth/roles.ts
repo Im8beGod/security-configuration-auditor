@@ -1,6 +1,7 @@
 import type { UserRole } from '../../shared/types/auth'
 
 export const TRAINING_ROLES: readonly UserRole[] = ['mapping_admin', 'admin']
+export const ADMIN_ROLES: readonly UserRole[] = ['admin']
 
 export function canAccessTraining(role: UserRole | string): boolean {
   return role === 'mapping_admin' || role === 'admin'

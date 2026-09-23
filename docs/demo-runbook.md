@@ -16,8 +16,10 @@ credentials, secrets, or a real customer configuration.
    preview. Emphasize that it is guidance only: no device command is executed.
 5. **Extensibility and close (3:00-4:00).** Upload `unknown-vendor.cfg`, then show the low-code mapping
    and Knowledge Pack workflow: executable validation, human approval, then
-   immutable publication for future audits. If available, note that local
-   Ollama offers suggestions only; it has no verdict or approval authority.
+   immutable publication for future audits. An administrator can also open
+   Runtime publishing to preview and publish a profile, safe automatic rule,
+   and assessment pack. If enabled, local Ollama offers suggestions only; it
+   has no verdict or approval authority.
 6. **Report and fleet view (4:00-5:00).** Generate/download the PDF report and
    return to the Fleet Dashboard. Close with: “The result is deterministic,
    evidence-backed, reviewable, and safely bounded as a prototype.”

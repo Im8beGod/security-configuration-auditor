@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
+from base64 import a85decode
 from hashlib import sha256
 from uuid import uuid4
+from zlib import decompress
 
 from sqlalchemy import func, select
 
@@ -39,6 +42,7 @@ from app.training.service import (
 from app.profile_resolution.runtime import parse_runtime_profile, profile_for, publish_runtime_profile
 from app.profile_resolution import PROFILE_REGISTRY
 from app.reporting.service import create_report
+from app.reporting.storage import get_report_storage
 
 
 RUN_ID = os.environ.get("SIH_RESTART_REUSE_RUN_ID")
@@ -254,6 +258,7 @@ def prepare():
 
 def verify():
     session_factory, storage = factory(), get_artifact_storage()
+    report_storage = get_report_storage()
     for kind in PROFILES:
         slug = f"compose-restart-{RUN_ID}-{kind}"
         with session_factory() as db:
@@ -305,6 +310,15 @@ def verify():
             with session_factory() as db:
                 report = db.get(Report, report_id)
                 assert report.storage_reference and report.sha256 and report.byte_size > 0
+                pdf = report_storage.read(report.storage_reference)
+                streams = re.findall(rb"stream\r?\n(.*?)endstream", pdf, re.S)
+                rendered = b"".join(decompress(a85decode(stream.strip(), adobe=True)) for stream in streams)
+                for required in (
+                    b"Compose runtime", b"Fictitious", b"Fictitious Runtime Framework",
+                    b"NEB-SSH-1", b"Pass", b"Evidence references",
+                    b"Framework coverage", b"Reviewed remediation", b"Unavailable",
+                ):
+                    assert required in rendered, required
                 print("report generated")
         with session_factory() as db:
             if kind == "runtime":

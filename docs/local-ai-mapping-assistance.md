@@ -48,11 +48,9 @@ $env:SIH_TRAINING_POSTGRES_TEST = '1'
 .\.venv\Scripts\python.exe -m pytest tests/integration/test_local_ai_postgres.py -q
 ```
 
-For real Ollama acceptance, additionally set `SIH_REAL_OLLAMA_TEST=1` and the native local URL/model. The real XML case calls the actual adapter with bounded development unresolved evidence through the backend API, validates its response, explicitly adopts it through the API, and runs the B3 executable validator. It asserts candidate SecurityFacts/EffectiveStates exist while normal fact/state tables remain unchanged. It never approves or publishes. A bad model output fails the test; there is no fake fallback. Do not alter the implementation just to fit generated output.
-
-Implementation-session results: 57 focused unit/regression tests passed; PostgreSQL CLI lifecycle and XML API/adoption/candidate-fact/state tests passed (2 tests), with the real Ollama case skipped; 3 frontend render/API contract tests and the frontend build passed. Frontend lint reports two existing MappingEditorPage React warnings. Real-runtime acceptance is **pending**: Ollama was not found on PATH and localhost:11434/api/tags was unreachable. No model response or held-out result is claimed. B4 is not sealed, committed or pushed.
+For real Ollama acceptance, additionally set `SIH_REAL_OLLAMA_TEST=1` and the native local URL/model. The manual GitHub Actions workflow uses the real Ollama provider and exercises unresolved evidence, strict schema/DSL/profile validation, bounded corrective retry, preview, draft adoption, executable validation, approval, immutable publication, and audit reuse. A bad model output fails safely; there is no fake fallback. Do not alter the implementation just to fit generated output.
 
 
 Frontend focused checks: `node --test tests/local-ai.test.mjs`, `npm run build`, `npm run lint` from `frontend/`.
 
-Migration head/current remain `20260908_0013`; B4 adds no schema changes. The requested Alembic drift check reports existing baseline differences: the model declares `ix_profile_manifest_versions_organization_id` absent from migration 0013/the database, and the database profile-resolution snapshot FK is RESTRICT while checked-in migration/model specify CASCADE. B4 does not alter those unrelated tables or historical constraints. This is a reported pre-existing drift finding, not a clean drift check.
+The current Alembic head is `20260924_0027`. Runtime profile, rule, assessment-pack, and published mapping versions are persisted and tenant-scoped; published artifacts are immutable. Normal CI remains deterministic and mocked, while the live Ollama workflow is optional/manual and model-resource dependent.

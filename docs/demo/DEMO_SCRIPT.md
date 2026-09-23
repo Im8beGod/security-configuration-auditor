@@ -6,7 +6,8 @@ in `demo/configurations/`.
 ## 0-15 Seconds: Fleet View
 
 Show the dashboard and device list. Identify Cisco IOS XE, FortiOS, Junos, and
-Arista EOS as bounded profiles converging into one canonical compliance path.
+Arista EOS as four bounded built-in profiles converging into one canonical
+compliance path.
 
 ## 15-35 Seconds: One Batch, Multiple Devices
 
@@ -22,7 +23,7 @@ each vendor and preview the reviewed procedure. Say:
 "The compliance result is deterministic. The remediation is a reviewed preview;
 the system does not execute commands."
 
-## 60-85 Seconds: Review Center
+## 60-85 Seconds: Review Center and Runtime Publishing
 
 Upload `unknown-vendor.cfg`. Open its unresolved syntax item, show raw evidence
 and candidate fields, then
@@ -41,5 +42,7 @@ remains available for comparison."
 
 Generate a PDF report. Show device identity, selected frameworks and controls,
 coverage counts, evidence, severity, and rendered remediation/verification/
-rollback commands. Close by stating that unavailable CIS/ISO source controls
-remain manual or unimplemented and this is not certification.
+rollback commands. If the admin page is used, show preview-before-publish for
+the runtime profile, rule, and assessment pack. Close by stating that the
+NIST, DISA, CIS, and ISO results are scoped technical coverage, not
+certification; unsupported controls remain manual or unavailable.

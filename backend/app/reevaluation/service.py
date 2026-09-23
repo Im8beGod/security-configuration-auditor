@@ -7,12 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.assessment_packs.service import AssessmentPackError, validate_requested_pack
 from app.audit.errors import AuditConflictError, AuditNotFoundError, AuditValidationError, AuditInfrastructureError
 from app.audit.service import validate_snapshot_evidence
 from app.db.models import Audit, AuditReevaluationReason, AuditStatus, KnowledgePackVersionRecord, MappingVersion, Snapshot, SnapshotStatus, User, UserRole
 from app.jobs.enums import JobType
 from app.jobs.service import enqueue_job
 from app.profile_resolution import PROFILE_REGISTRY
+from app.profile_resolution.runtime import RuntimeProfileError, profile_for
 
 
 COMPLETED_STATUSES = frozenset({AuditStatus.COMPLETED, AuditStatus.COMPLETED_WITH_UNKNOWNS, AuditStatus.COMPLETED_WITH_ERRORS})
@@ -41,8 +43,14 @@ def _source(db: Session, user: User, audit_id: UUID, *, lock: bool = False) -> A
 
 def _candidates(db: Session, source: Audit) -> tuple[KnowledgePackVersionRecord, ...]:
     profile = source.version_refs.get("device_profile_version_id") or source.profile_resolution.get("profile_version_id")
-    if not isinstance(profile, str) or PROFILE_REGISTRY.get(profile) is None:
+    if not isinstance(profile, str):
         return ()
+    if PROFILE_REGISTRY.get(profile) is None:
+        try:
+            if profile_for(db, source.organization_id, profile) is None:
+                return ()
+        except RuntimeProfileError:
+            return ()
     current = source.version_refs.get("knowledge_pack_version_id")
     packs = list(db.scalars(select(KnowledgePackVersionRecord).where(
         KnowledgePackVersionRecord.organization_id == source.organization_id
@@ -80,7 +88,13 @@ def eligibility(db: Session, user: User, audit_id: UUID) -> ReevaluationEligibil
     return ReevaluationEligibility(bool(candidates), None if candidates else "no_compatible_newer_knowledge_pack", source, candidates)
 
 
-def start(db: Session, user: User, audit_id: UUID, target_knowledge_pack_version_id: UUID) -> tuple[Audit, object]:
+def start(
+    db: Session,
+    user: User,
+    audit_id: UUID,
+    target_knowledge_pack_version_id: UUID,
+    assessment_pack_version_id: UUID | None = None,
+) -> tuple[Audit, object]:
     _require_privileged(user)
     source = _source(db, user, audit_id, lock=True)
     check = eligibility(db, user, audit_id)
@@ -92,6 +106,13 @@ def start(db: Session, user: User, audit_id: UUID, target_knowledge_pack_version
     ).with_for_update())
     if target is None or target not in check.candidates:
         raise AuditValidationError("knowledge_pack_ineligible", "Selected Knowledge Pack is not eligible")
+    assessment_ref = None
+    if assessment_pack_version_id is not None:
+        try:
+            validate_requested_pack(db, user.organization_id, assessment_pack_version_id)
+        except AssessmentPackError as error:
+            raise AuditValidationError("assessment_pack_ineligible", "Selected Assessment Pack is unavailable") from error
+        assessment_ref = str(assessment_pack_version_id)
     snapshot = db.scalar(select(Snapshot).where(Snapshot.snapshot_id == source.snapshot_id).with_for_update())
     if snapshot is None:
         raise AuditValidationError("source_snapshot_invalid", "Source Snapshot is unavailable")
@@ -110,7 +131,11 @@ def start(db: Session, user: User, audit_id: UUID, target_knowledge_pack_version
         audit_batch_id=source.audit_batch_id, revision_number=latest + 1, previous_audit_id=source.audit_id,
         reevaluation_reason=AuditReevaluationReason.KNOWLEDGE_PACK_UPDATE, status=AuditStatus.QUEUED,
         processing_stage=None, selected_frameworks=list(source.selected_frameworks),
-        version_refs={**source.version_refs, "knowledge_pack_version_id": str(target_knowledge_pack_version_id)},
+        version_refs={
+            **source.version_refs,
+            "knowledge_pack_version_id": str(target_knowledge_pack_version_id),
+            **({"assessment_pack_version_id": assessment_ref} if assessment_ref else {}),
+        },
         # Profile resolution is historical pinned context, not a new identification pass.
         profile_resolution=dict(source.profile_resolution), verdict_counts={}, severity_counts={}, coverage={}, created_by=user.user_id,
         schema_version=source.schema_version,

@@ -189,6 +189,16 @@ def test_prompt_is_versioned_deterministic_and_injection_is_only_data():
     assert "provider_metadata" not in prompt["format"]["properties"]
 
 
+def test_cli_prompt_is_bounded_to_reviewed_reader_and_candidates():
+    ctx = sanitized_context("secure-shell enable", "", "cisco.ios_xe.17@1.0.0", ["management.remote.ssh.enabled"], [])
+    prompt = build_prompt(ctx, "local-model", PROFILE_REGISTRY[ctx.profile_version_id])
+    system = prompt["messages"][0]["content"]
+    user = json.loads(prompt["messages"][1]["content"])
+    assert "only command_equality or command_prefix" in system
+    assert "Use only xml_path" not in system
+    assert user["canonical_fields"][0]["field_id"] == "management.remote.ssh.enabled"
+
+
 def test_controls_redaction_and_structural_context_are_bounded():
     ctx = sanitized_context("hostname\x00demo\npassword 7 never-send", "", None, [], [], structural_context="p" * 10000)
     assert "\x00" not in ctx.unresolved_text and "hostname demo" in ctx.unresolved_text

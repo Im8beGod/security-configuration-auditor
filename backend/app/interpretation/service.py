@@ -1097,6 +1097,11 @@ def _persist_unresolved_blocks(
     all_field_ids = sorted({
         field_id for rule in rules for field_id in rule.required_effective_states
     })
+    if not all_field_ids and profile is not None:
+        all_field_ids = sorted(
+            field_id for field_id in profile.coverage_manifest.get("canonical_fields", ())
+            if isinstance(field_id, str)
+        )
     all_rule_ids = sorted(rule.rule_id for rule in rules)
     mapping_fields = {
         mapping.mapping_id: mapping.field_id for mapping in knowledge_pack.mappings

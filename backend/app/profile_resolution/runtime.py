@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ArtifactEvidenceType, DeviceClass, ProfileManifestVersion
 from app.profile_resolution.registry import ProfileManifest, VersionConstraint, XmlIdentitySelector, PROFILE_REGISTRY
+from app.security_model import FIELD_REGISTRY
 
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9._-]{0,127}")
@@ -122,6 +123,14 @@ def parse_runtime_profile(content: bytes) -> ProfileManifest:
     capabilities = raw.get("capabilities", ["structural_parsing", "semantic_interpretation", "effective_state_resolution", "administrator_training"])
     if not isinstance(capabilities, list) or not capabilities or not set(capabilities).issubset(_CAPABILITIES):
         raise RuntimeProfileError("Profile capabilities are invalid")
+    canonical_fields = raw.get("canonical_fields", [])
+    if (
+        not isinstance(canonical_fields, list)
+        or len(canonical_fields) > 64
+        or any(not isinstance(item, str) or item not in FIELD_REGISTRY for item in canonical_fields)
+        or len(set(canonical_fields)) != len(canonical_fields)
+    ):
+        raise RuntimeProfileError("Profile canonical fields are invalid")
     selectors = _selectors(raw.get("identity_selectors"), reader)
     return ProfileManifest(
         profile_id=profile_id, profile_version_id=f"{profile_id}@{profile_version}", profile_version=profile_version,
@@ -129,7 +138,7 @@ def parse_runtime_profile(content: bytes) -> ProfileManifest:
         version_constraint=VersionConstraint(frozenset(majors), _version(constraints.get("minimum_version")), _version(constraints.get("maximum_version")), frozenset(excluded)),
         device_classes=device_classes, accepted_evidence_types=evidence_types, structural_reader_name=reader,
         knowledge_pack_name=f"runtime.{profile_id}@{profile_version}", capabilities=frozenset(capabilities),
-        coverage_manifest=MappingProxyType({"structural_reader": reader, "canonical_fields": (), "limitations": ("Runtime profiles have only administrator-published mappings; unmapped evidence remains UNKNOWN",)}),
+        coverage_manifest=MappingProxyType({"structural_reader": reader, "canonical_fields": tuple(canonical_fields), "limitations": ("Runtime profiles have only administrator-published mappings; unmapped evidence remains UNKNOWN",)}),
         detection_tokens=tuple(tokens), xml_identity_selectors=selectors, structural_evidence_types=evidence_types,
     )
 

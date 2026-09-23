@@ -39,3 +39,10 @@ def test_runtime_profile_rejects_unsafe_reader_and_never_matches_without_version
                                 "acme.txt", "a" * 64, {}, "Acme NetOS", 10, False)
     result = resolve_profile(SnapshotEvidence(UUID(int=2), UUID(int=3), UUID(int=4), (document,), (), 11), runtime_manifests=(profile,))
     assert result.selected_profile_version_id != profile.profile_version_id
+
+
+def test_runtime_profile_accepts_only_declared_known_canonical_fields():
+    profile = parse_runtime_profile(_manifest(canonical_fields=["management.remote.ssh.enabled"]))
+    assert profile.coverage_manifest["canonical_fields"] == ("management.remote.ssh.enabled",)
+    with pytest.raises(RuntimeProfileError):
+        parse_runtime_profile(_manifest(canonical_fields=["not.a.canonical.field"]))

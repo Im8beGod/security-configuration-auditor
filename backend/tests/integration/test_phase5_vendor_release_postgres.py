@@ -74,7 +74,7 @@ def test_vendor_upload_audit_remediation_and_pdf(
     artifacts = LocalFilesystemArtifactStorage(tmp_path / "artifacts")
     reports = LocalFilesystemReportStorage(tmp_path / "reports")
     try:
-        assert connection.scalar(text("select version_num from alembic_version")) == "20260922_0024"
+        assert connection.scalar(text("select version_num from alembic_version")) == "20260923_0025"
         suffix = uuid4().hex
         organization_id, _ = bootstrap_admin(
             factory, "P5 Vendor", f"p5-vendor-{suffix}",

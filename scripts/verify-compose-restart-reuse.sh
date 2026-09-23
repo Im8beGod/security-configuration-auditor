@@ -13,4 +13,5 @@ docker compose up -d --wait --build backend worker
 docker compose run --rm -e SIH_RESTART_REUSE_RUN_ID="$SIH_RESTART_REUSE_RUN_ID" -v "$PWD/backend:/app/backend" backend python /app/backend/scripts/compose_restart_reuse.py prepare
 docker compose restart backend worker
 docker compose up -d --wait backend
+echo "services restarted"
 docker compose run --rm -e SIH_RESTART_REUSE_RUN_ID="$SIH_RESTART_REUSE_RUN_ID" -v "$PWD/backend:/app/backend" backend python /app/backend/scripts/compose_restart_reuse.py verify

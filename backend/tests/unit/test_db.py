@@ -32,7 +32,7 @@ def test_base_has_current_identity_metadata() -> None:
     "audits", "devices", "effective_states", "findings", "jobs", "knowledge_pack_versions", "knowledge_packs",
     "mapping_validation_runs", "mapping_versions", "organizations", "profile_manifest_versions",
     "profile_resolution_decisions", "remediation_procedures", "reports", "security_facts", "snapshots",
-    "unresolved_blocks", "users",
+    "unresolved_blocks", "users", "runtime_rule_versions",
     }
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from uuid import UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -344,6 +344,7 @@ def interpret_structural_ir(
     diagnostics: list[InterpretationDiagnostic] = []
     diagnostic_keys: set[tuple[str, str | None, UUID | None]] = set()
     matched_node_ids: set[str] = set()
+    consumed_context_node_ids: set[str] = set()
 
     for node in statements:
         for mapping in pack.mappings:
@@ -412,6 +413,10 @@ def interpret_structural_ir(
             )
             facts.append(fact)
             matched_node_ids.add(node.node_id)
+            if scope_outcome.context_node is not None:
+                # A structural scope/container consumed to establish this fact
+                # is evidence context, not independent unresolved syntax.
+                consumed_context_node_ids.add(scope_outcome.context_node.node_id)
 
     metrics = InterpretationMetrics(
         nodes_considered=len(evidence_nodes),
@@ -425,7 +430,7 @@ def interpret_structural_ir(
         facts=tuple(facts), diagnostics=tuple(diagnostics), metrics=metrics,
         unresolved_node_ids=tuple(
             node.node_id for node in evidence_nodes
-            if node.node_id not in matched_node_ids
+            if node.node_id not in matched_node_ids | consumed_context_node_ids
         ),
     )
 
@@ -1013,7 +1018,7 @@ def _build_negated_fact(
         )
 
     if behavior is NegationBehavior.REMOVE_VALUE:
-        extraction = EXTRACTORS[mapping.extractor](node)
+        extraction = _extract_mapping(mapping, node, ir)
         if extraction.value is None:
             return None
         try:
@@ -1033,7 +1038,7 @@ def _build_negated_fact(
             mapping_version_id=mapping.removal_mapping_version_id,
         )
     if behavior is NegationBehavior.INVERT_BOOLEAN:
-        extraction = EXTRACTORS[mapping.extractor](node)
+        extraction = _extract_mapping(mapping, node, ir)
         if extraction.value is None or extraction.value.type is not TypedValueType.BOOLEAN:
             return None
         return _build_fact(

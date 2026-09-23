@@ -187,7 +187,10 @@ def test_review_center_validation_executes_xml_facts_and_effective_states_withou
     reference = storage.write(content, organization_id=organization_id, artifact_id=artifact_id)
     artifact = Artifact(artifact_id=artifact_id, organization_id=organization_id, snapshot_id=snapshot_id, original_filename="dev-logging.xml", storage_reference=reference, byte_size=len(content), sha256=sha256(content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.XML, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY)
     snapshot = SimpleNamespace(snapshot_id=snapshot_id, organization_id=organization_id, device_id=uuid4(), status="locked")
-    db = SimpleNamespace(scalar=lambda _statement: artifact, get=lambda _model, _id: snapshot)
+    db = SimpleNamespace(
+        scalar=lambda statement: None if "profile_manifest_versions" in str(statement) else artifact,
+        get=lambda _model, _id: snapshot,
+    )
     monkeypatch.setattr("app.ingestion.storage.get_artifact_storage", lambda: storage)
 
     # Build each candidate from the same immutable definition contract.

@@ -43,7 +43,7 @@ def test_postgresql_enforces_frozen_domain_constraints():
         with engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260922_0024"
+            ) == "20260923_0025"
             before = application_counts(connection)
             connection.rollback()
             outer = connection.begin()
@@ -164,6 +164,6 @@ def test_postgresql_enforces_frozen_domain_constraints():
             assert application_counts(connection) == before
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20260922_0024"
+            ) == "20260923_0025"
     finally:
         engine.dispose()

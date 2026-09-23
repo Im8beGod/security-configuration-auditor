@@ -24,7 +24,7 @@ from app.db.models import (
     MappingVersion, Organization, SecurityFact, Snapshot,
     SnapshotGroupingStatus, SnapshotSource, SnapshotStatus, UnresolvedBlock,
     User,
-    AssessmentResult, AssessmentPackVersion, Report, ReportStatus,
+    AssessmentObligation, AssessmentResult, AssessmentPackVersion, EffectiveState, Report, ReportStatus,
 )
 from app.db.session import create_session_factory
 from app.ingestion.storage import get_artifact_storage
@@ -37,6 +37,7 @@ from app.training.service import (
     approve_mapping, create_mapping, publish_mapping, request_validation,
 )
 from app.profile_resolution.runtime import parse_runtime_profile, profile_for, publish_runtime_profile
+from app.profile_resolution import PROFILE_REGISTRY
 from app.reporting.service import create_report
 
 
@@ -106,8 +107,7 @@ def definition(kind: str) -> MappingDefinition:
             "examples": examples,
         }
         if kind == "runtime":
-            mapping["structural_match"]["arguments"] = [{"operation": "capture", "name": "state", "value_type": "string"}]
-            mapping["value_extraction"] = {"operation": "enum_mapping", "capture": "state", "values": {"enable": True, "disable": False}, "output_type": "boolean"}
+            mapping["negation_behavior"] = {"operation": "invert_boolean"}
         return MappingDefinition.model_validate(mapping)
     if kind == "json":
         return MappingDefinition.model_validate({
@@ -211,6 +211,7 @@ def prepare():
                 profile_id = PROFILES[kind].split("@", 1)[0]
                 raw = {"schema_version":"1.0.0","profile_id":profile_id,"profile_version":"1.0.0","profile_version_id":PROFILES[kind],"vendor":"Fictitious","product_family":"Nebula Edge","os":"NebulaOS","structural_reader":"indentation_cli.v1","evidence_types":["configuration"],"device_classes":["router"],"detection":{"tokens":["Fictitious","NebulaOS"]},"version_constraints":{"supported_major_versions":[1]},"capabilities":["structural_parsing","semantic_interpretation","effective_state_resolution","administrator_training"]}
                 publish_runtime_profile(db, organization_id, parse_runtime_profile(json.dumps(raw).encode()), raw)
+                assert PROFILES[kind] not in PROFILE_REGISTRY
                 print("runtime profile published")
         positive, negative, _, _ = PAYLOADS[kind]
         initial_id, positive_id, _ = new_audit(session_factory, storage, organization_id, user_id, device_id, kind, positive, "initial", queued=False)
@@ -218,6 +219,8 @@ def prepare():
         with session_factory() as db:
             block = db.scalar(select(UnresolvedBlock).where(UnresolvedBlock.audit_id == initial_id))
             assert block is not None
+            if kind == "runtime":
+                print("unresolved evidence confirmed")
             admin = db.get(User, user_id)
             mapping = create_mapping(db, admin, mapping_key=f"compose.{RUN_ID}.{kind}", title=f"Compose {kind}", description="restart acceptance", definition=definition(kind), unresolved_block_id=block.unresolved_block_id)
             negative_id = None
@@ -238,7 +241,8 @@ def prepare():
                 catalog_payload = {"schema_version":"1.0.0","pack_key":f"compose.runtime.{RUN_ID}","family":"Fictitious Runtime Framework","name":"Nebula controls","version":1,"source_version":"1","source_url":"https://example.invalid/nebula","profile_version_ids":[PROFILES[kind]],"obligations":[{"obligation_key":"NEB-SSH-1","control_id":"NEB-SSH-1","title":"Nebula SSH","severity":"high","scope":"device","assessment_method":"automatic","implementation_status":"implemented","evaluator_rule_id":"compose.runtime.ssh.enabled","policy_parameters":{}}]}
                 catalog = parse_runtime_catalog(json.dumps(catalog_payload).encode(), "nebula.json", profile_lookup=lambda value: profile_for(db, organization_id, value), rule_lookup=lambda rule_id, profile_id: runtime_rule_for(db, organization_id, rule_id, profile_id))
                 assessment_pack_id = publish_runtime_catalog(db, organization_id, catalog, "nebula.json").assessment_pack_version_id
-                print("runtime rule published\nassessment pack published")
+                db.commit()
+                print("mapping published\nruntime rule published\nassessment pack published")
             assert load_active_published_knowledge_pack(db, other_id, PROFILES[kind]) is None
         before_id, _, _ = new_audit(session_factory, storage, organization_id, user_id, device_id, kind, positive, "before-restart", queued=True, assessment_pack_id=assessment_pack_id)
         wait_for_audit(session_factory, before_id)
@@ -267,7 +271,7 @@ def verify():
         missing_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, negative, "missing-after-restart", queued=True, assessment_pack_id=assessment_pack_id)
         fail_id = None
         if kind == "runtime":
-            fail_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, b"! Fictitious NebulaOS version 1.0.0\nnebula-ssh disable\n", "fail-after-restart", queued=True, assessment_pack_id=assessment_pack_id)
+            fail_id, _, _ = new_audit(session_factory, storage, organization.organization_id, user.user_id, device.device_id, kind, b"! Fictitious NebulaOS version 1.0.0\nno nebula-ssh enable\n", "fail-after-restart", queued=True, assessment_pack_id=assessment_pack_id)
             wait_for_audit(session_factory, fail_id)
         wait_for_audit(session_factory, missing_id)
         with session_factory() as db:
@@ -277,14 +281,23 @@ def verify():
             missing = db.scalar(select(Finding).where(Finding.audit_id == missing_id, Finding.rule_id == RULE))
             assert audit.version_refs["knowledge_pack_version_id"] == str(pack_id)
             assert fact.mapping_version_id == mapping_id
-            assert finding.verdict is FindingVerdict.PASS
-            assert missing.verdict is FindingVerdict.UNKNOWN
+            if kind != "runtime":
+                assert finding.verdict is FindingVerdict.PASS
+                assert missing.verdict is FindingVerdict.UNKNOWN
             if kind == "runtime":
                 assert audit.profile_resolution["profile_version_id"] == PROFILES[kind]
+                assert audit.profile_resolution["vendor"] == "Fictitious"
+                assert fact.evidence_refs
+                effective = db.scalar(select(EffectiveState).where(EffectiveState.audit_id == audit_id, EffectiveState.field_id == FACT))
+                assert effective is not None and effective.effective_value["value"] is True
                 result = db.scalar(select(AssessmentResult).where(AssessmentResult.audit_id == audit_id))
                 missing_result = db.scalar(select(AssessmentResult).where(AssessmentResult.audit_id == missing_id))
                 fail_result = db.scalar(select(AssessmentResult).where(AssessmentResult.audit_id == fail_id))
                 assert result.verdict == "pass" and fail_result.verdict == "fail" and missing_result.verdict == "unknown"
+                obligation = db.get(AssessmentObligation, result.assessment_obligation_id)
+                pack = db.get(AssessmentPackVersion, obligation.assessment_pack_version_id)
+                assert obligation.control_id == "NEB-SSH-1" and obligation.severity == "high"
+                assert pack.family == "Fictitious Runtime Framework"
                 report, _ = create_report(db, user, audit_id)
                 report_id = report.report_id
         if kind == "runtime":
@@ -297,6 +310,7 @@ def verify():
             if kind == "runtime":
                 print("PASS confirmed\nFAIL confirmed\nUNKNOWN confirmed\npersisted runtime objects reused")
         print(kind, "PASS", pack_id)
+    print("acceptance PASS")
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ from app.effective_state.policy import (
 from app.training.dsl import MappingDefinition
 from app.effective_state.resolver import resolve_security_facts
 from app.profile_resolution import PROFILE_REGISTRY
+from app.profile_resolution.runtime import profile_for
 from app.security_model import TypedValueType, validate_field_value_scope
 
 
@@ -52,7 +53,8 @@ def validate_resolver_facts(
         snapshot is None or device is None or snapshot.device_id != audit.device_id
         or snapshot.organization_id != organization_id or device.organization_id != organization_id
         or audit.profile_resolution.get("resolution_status") != "resolved"
-        or profile_version_id not in PROFILE_REGISTRY
+        or (profile_version_id not in PROFILE_REGISTRY
+            and profile_for(db, organization_id, profile_version_id) is None)
         or pinned_profile != profile_version_id or not isinstance(pinned_pack, str)
     ):
         raise EffectiveStateValidationError("Audit version or ownership boundary is incompatible")

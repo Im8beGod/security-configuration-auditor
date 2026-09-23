@@ -182,7 +182,7 @@ class ScopeResolution(StrictModel):
 
 
 class ExplicitBehavior(StrictModel):
-    operation: Literal["unsupported", "emit_value", "reset_to_default", "remove_value", "unknown"]
+    operation: Literal["unsupported", "emit_value", "reset_to_default", "remove_value", "invert_boolean", "unknown"]
 
 
 class ValidationNode(StrictModel):

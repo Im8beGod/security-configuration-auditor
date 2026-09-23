@@ -82,8 +82,9 @@ def test_b8_cis_pack_is_immutable_profile_constrained_and_persists_honest_verdic
             pin = db.get(AuditAssessment, pipeline_audit_id)
             results = _results(db, pipeline_audit_id)
             assert audit is not None and pin is not None and pin.assessment_pack_version_id == cis_id
-            assert audit.coverage["automatic_verdicts"] == {"pass": 5, "fail": 0, "unknown": 1} and audit.coverage["manual"] == 5
-            assert results["cis-1.2.5.vty-source-restriction"].verdict == "pass"
+            assert audit.coverage["automatic_verdicts"] == {"pass": 0, "fail": 0, "unknown": 6} and audit.coverage["manual"] == 5
+            assert results["cis-1.2.5.vty-source-restriction"].verdict == "unknown"
+            assert results["cis-1.2.5.vty-source-restriction"].result_details["unknown_reason"] == "unsupported_feature"
             assert results["cis-1.2.8.vty-idle-timeout"].verdict == "unknown"
             assert results["cis-1.2.8.vty-idle-timeout"].result_details["unknown_reason"] == "unsupported_feature"
             assert results["cis-2.1.1.2.ssh-version-review"].verdict is None

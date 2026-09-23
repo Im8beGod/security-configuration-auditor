@@ -196,6 +196,7 @@ CISCO_IOS_XE_17 = ProfileManifest(
             "logging on",
             "ntp authenticate|authentication-key <id>|trusted-key <id>",
         ),
+        "identity_only_commands": ("hostname",),
         "limitations": (
             "incomplete Cisco grammar",
             "no documented defaults, inheritance, references, or bindings",

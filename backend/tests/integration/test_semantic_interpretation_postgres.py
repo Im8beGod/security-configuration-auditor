@@ -160,7 +160,7 @@ def test_audit_interpretation_is_atomic_idempotent_and_tenant_safe(tmp_path, mon
                 SecurityFact.audit_id == audit_id
             )) == 9
             unresolved_count = db.scalar(select(func.count()).select_from(UnresolvedBlock).where(UnresolvedBlock.audit_id == audit_id))
-            assert unresolved_count and unresolved_count > 0
+            assert unresolved_count == 0
             persisted = list_audit_security_facts(db, audit_id, first_org)
             assert {fact.fact_id for fact in persisted} == first_ids
             assert {fact.field_id for fact in persisted} == {

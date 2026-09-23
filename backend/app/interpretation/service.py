@@ -803,6 +803,7 @@ def interpret_audit(
             context=context,
             profile_id=profile_id,
             profile_version_id=profile_version_id,
+            profile=profile,
             parsed_irs=parsed_irs,
             results=artifact_results,
             knowledge_pack=pack,
@@ -1087,6 +1088,7 @@ def _persist_unresolved_blocks(
     results: list[InterpretationResult],
     knowledge_pack: KnowledgePack,
     unsupported_artifacts: list[tuple[Artifact, str]],
+    profile: ProfileManifest | None = None,
 ) -> None:
     from app.compliance.rule_registry import RULE_PACK_BY_PROFILE
 
@@ -1107,6 +1109,17 @@ def _persist_unresolved_blocks(
         nodes = {node.node_id: node for node in ir.nodes}
         for node_id in result.unresolved_node_ids:
             node = nodes[node_id]
+            # Manifest-declared identity syntax cannot affect canonical
+            # compliance fields and is not unresolved configuration evidence.
+            if (
+                isinstance(ir, StructuralIR)
+                and node.kind is ConfigNodeKind.STATEMENT
+                and node.command in (
+                    profile.coverage_manifest.get("identity_only_commands", ())
+                    if profile is not None else ()
+                )
+            ):
+                continue
             parent = nodes.get(node.parent_id) if node.parent_id else None
             artifact_id = node.artifact_id if isinstance(ir, StructuralIR) else node.source.artifact_id
             source_label = node.source_label if isinstance(ir, StructuralIR) else node.source.source_label

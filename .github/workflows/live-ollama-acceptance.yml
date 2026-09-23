@@ -1,0 +1,78 @@
+name: Live Ollama Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Local Ollama model to pull for the live acceptance
+        required: true
+        default: qwen2.5-coder:7b-instruct-q4_K_M
+        type: string
+
+jobs:
+  live-ollama:
+    name: Live Ollama Acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: security_auditor_test
+          POSTGRES_USER: security_auditor_test
+          POSTGRES_PASSWORD: ci-test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U security_auditor_test -d security_auditor_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      POSTGRES_DB: security_auditor_test
+      POSTGRES_USER: security_auditor_test
+      POSTGRES_PASSWORD: ci-test-only-password
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      JWT_SECRET: ci-test-only-signing-key-at-least-32-characters
+      AI_MAPPING_SUGGESTIONS_ENABLED: "true"
+      AI_MAPPING_PROVIDER: ollama
+      AI_OLLAMA_BASE_URL: http://localhost:11434
+      AI_OLLAMA_MODEL: ${{ inputs.model }}
+      AI_OLLAMA_TIMEOUT_SECONDS: "120"
+      SIH_TRAINING_POSTGRES_TEST: "1"
+      SIH_REAL_OLLAMA_TEST: "1"
+      OLLAMA_MODEL: ${{ inputs.model }}
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start Ollama and pull selected model
+        working-directory: .
+        run: |
+          docker run -d --name sih-live-ollama -p 11434:11434 ollama/ollama
+          until curl --fail --silent http://localhost:11434/api/tags >/dev/null; do sleep 2; done
+          docker exec sih-live-ollama ollama pull "$OLLAMA_MODEL"
+
+      - name: Migrate to Alembic head
+        run: alembic -c ../database/alembic.ini upgrade head
+
+      - name: Exercise live provider through publication and audit reuse
+        run: python -m pytest tests/integration/test_local_ai_postgres.py -v
+
+      - name: Remove Ollama
+        if: always()
+        working-directory: .
+        run: docker rm -f sih-live-ollama || true

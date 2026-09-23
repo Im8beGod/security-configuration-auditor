@@ -216,6 +216,20 @@ def get_mapping_operation_policy(
     return policy
 
 
+def get_sealed_mapping_operation_policy(
+    mapping_version_id: UUID | None, field_id: str,
+) -> MappingOperationPolicy:
+    """Find a unique sealed mapping policy when a published pack overlays it."""
+    matches = {
+        (policy.field_id, policy.operation): policy
+        for policy in MAPPING_OPERATION_POLICIES.values()
+        if policy.mapping_version_id == mapping_version_id and policy.field_id == field_id
+    }
+    if len(matches) != 1:
+        raise EffectiveStateValidationError("SecurityFact mapping provenance is incompatible")
+    return next(iter(matches.values()))
+
+
 def lookup_documented_default(
     profile_version_id: str,
     knowledge_pack_version_id: UUID,

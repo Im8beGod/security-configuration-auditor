@@ -69,6 +69,13 @@ technical alignment only.
 
 Optional local Ollama integration provides mapping suggestions only. There is
 no cloud fallback, no automatic approval, and auditing continues without AI.
+Normal CI uses mocked responses for deterministic schema/DSL, redaction,
+injection, local-origin, and outage coverage. The manual-only **Live Ollama
+Acceptance** workflow pulls its selected local model and exercises the real
+provider through suggestion, draft adoption, validation, approval, immutable
+publication, and audit re-evaluation. It is intentionally not part of normal
+CI; model availability and output quality are acceptance inputs, not a
+deterministic build dependency.
 
 ## Remediation safety boundary
 

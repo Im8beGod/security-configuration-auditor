@@ -20,7 +20,7 @@ from app.effective_state.models import (
 )
 from app.effective_state.policy import (
     FactOperation, MappingOperationPolicy, get_field_policy,
-    get_mapping_operation_policy,
+    get_mapping_operation_policy, get_sealed_mapping_operation_policy,
     validate_policy_metadata,
 )
 from app.training.dsl import MappingDefinition
@@ -170,7 +170,14 @@ def _operation_policy(db: Session, audit: Audit, fact: SecurityFact) -> MappingO
     try:
         return get_mapping_operation_policy(fact.knowledge_pack_version_id, fact.mapping_version_id, fact.field_id)
     except EffectiveStateValidationError:
-        pass
+        try:
+            sealed = get_sealed_mapping_operation_policy(fact.mapping_version_id, fact.field_id)
+            return MappingOperationPolicy(
+                fact.knowledge_pack_version_id, fact.mapping_version_id,
+                fact.field_id, sealed.operation,
+            )
+        except EffectiveStateValidationError:
+            pass
     if fact.mapping_version_id is None or str(fact.knowledge_pack_version_id) != audit.version_refs.get("knowledge_pack_version_id"):
         raise EffectiveStateValidationError("SecurityFact mapping provenance is incompatible")
     pack = db.scalar(select(KnowledgePackVersionRecord).where(

@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.cli.bootstrap_admin import bootstrap_admin
 from app.compliance.verdicts import FindingSeverity, FindingVerdict
 from app.core.config import get_settings
+from app.audit.pipeline import AuditPipelineCoordinator
 from app.db.engine import create_database_engine
 from app.db.models import (
     Audit, AuditReevaluationReason, AuditStatus, Device, Finding, KnowledgePackVersionRecord, MappingStatus, MappingVersion,
@@ -27,6 +28,8 @@ from app.training.service import (
 
 from app.training.ai import DeterministicFakeSuggestionProvider, MappingSuggestion, OllamaSuggestionProvider
 from app.training.service import suggest_mapping, adopt_suggestion
+from app.reevaluation.service import start as start_reevaluation
+from app.snapshots.service import calculate_snapshot_hash
 from test_training_postgres import _definition
 
 pytestmark = pytest.mark.skipif(os.environ.get("SIH_TRAINING_POSTGRES_TEST") != "1", reason="Requires development PostgreSQL")
@@ -116,7 +119,7 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
             db.add(device); db.flush()
             snapshot = Snapshot(organization_id=organization_id, device_id=device.device_id, label="learning", grouping_status=SnapshotGroupingStatus.MANUALLY_CONFIRMED, snapshot_hash=sha256(suffix.encode()).hexdigest(), artifact_count=0, source=SnapshotSource.UPLOAD, status=SnapshotStatus.LOCKED, created_by=admin_id)
             db.add(snapshot); db.flush()
-            audit = Audit(organization_id=organization_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, revision_number=1, reevaluation_reason=AuditReevaluationReason.INITIAL, status=AuditStatus.COMPLETED_WITH_UNKNOWNS, selected_frameworks=[], version_refs={"knowledge_pack_version_id": "sealed-pack", "device_profile_version_id": "juniper.junos.18@1.0.0"}, profile_resolution={"profile_version_id": "juniper.junos.18@1.0.0"}, verdict_counts={"unknown": 1}, severity_counts={}, coverage={}, created_by=admin_id)
+            audit = Audit(organization_id=organization_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, revision_number=1, reevaluation_reason=AuditReevaluationReason.INITIAL, status=AuditStatus.COMPLETED_WITH_UNKNOWNS, selected_frameworks=[], version_refs={"knowledge_pack_version_id": "sealed-pack", "device_profile_version_id": "juniper.junos.18@1.0.0"}, profile_resolution={"profile_id": "juniper.junos.18", "profile_version_id": "juniper.junos.18@1.0.0", "resolution_status": "resolved", "confidence": "high", "vendor": "Juniper", "product_family": "Junos", "os": "Junos", "metadata": {}}, verdict_counts={"unknown": 1}, severity_counts={}, coverage={}, created_by=admin_id)
             db.add(audit); db.flush()
             content = b"<configuration><system><services><ssh/></services></system></configuration>"
             artifact_id = uuid4()
@@ -127,6 +130,8 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
             negative_reference = storage.write(negative_content, organization_id=organization_id, artifact_id=negative_artifact_id)
             negative_artifact = Artifact(artifact_id=negative_artifact_id, organization_id=organization_id, snapshot_id=snapshot.snapshot_id, original_filename="b4-negative.xml", storage_reference=negative_reference, byte_size=len(negative_content), sha256=sha256(negative_content).hexdigest(), encoding="utf-8", content_family=ArtifactContentFamily.XML, evidence_type=ArtifactEvidenceType.STRUCTURED_EXPORT, status=ArtifactStatus.READY)
             db.add_all([artifact, negative_artifact]); db.flush()
+            snapshot.artifact_count = 2
+            snapshot.snapshot_hash = calculate_snapshot_hash([artifact.sha256, negative_artifact.sha256])
             block = UnresolvedBlock(organization_id=organization_id, audit_id=audit.audit_id, device_id=device.device_id, snapshot_id=snapshot.snapshot_id, profile_id="juniper.junos.18", profile_version_id="juniper.junos.18@1.0.0", source_ir_node_ids=["node-1"], evidence_refs=[{"artifact_id": str(artifact_id)}], raw_text="<ssh/>", surrounding_context=content.decode(), unknown_reason="unmapped_syntax", candidate_field_ids=["management.remote.ssh.enabled"], affected_rule_ids=["rule.unknown"], fingerprint=sha256(f"{audit.audit_id}:node-1".encode()).hexdigest(), occurrence={"xml_path": ["configuration[1]", "system[1]", "services[1]", "ssh[1]"]})
             db.add(block)
             finding = Finding(finding_id=uuid4(), audit_id=audit.audit_id, device_id=device.device_id, comparison_key="unknown", rule_id="rule.unknown", rule_pack_version_id=uuid4(), title="Unknown", security_domain="management", verdict=FindingVerdict.UNKNOWN, severity=FindingSeverity.MEDIUM, expected_state={}, observed_state=None, explanation="Persisted unknown", affected_scope=None, effective_state_refs=[], evidence_refs=[], unknown_reason="missing_evidence", framework_references=[], remediation_procedure_id=None)
@@ -185,6 +190,13 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
                 assert db.get(Audit, audit_id).version_refs == original_refs
                 finding = db.get(Finding, finding_id)
                 assert (finding.verdict, finding.explanation, finding.unknown_reason) == original_finding
+                approved = approve_mapping(db, admin, mapping_id)
+                published, pack = publish_mapping(db, admin, approved.mapping_version_id)
+                assert published.status == MappingStatus.PUBLISHED
+                reprocessed, _ = start_reevaluation(db, admin, audit_id, pack.knowledge_pack_version_id)
+                reused = AuditPipelineCoordinator(factory, storage).run(reprocessed.audit_id, organization_id)
+                assert reused.interpretation is not None
+                assert any(fact.mapping_version_id == published.mapping_version_id for fact in reused.interpretation.facts)
                 # Role checks and nonfatal outage apply to the same API surface.
                 app.dependency_overrides[get_current_user] = lambda: type("Analyst", (), {"role": UserRole.ANALYST})()
                 assert client.get("/api/v1/training/ai/status").status_code == 403

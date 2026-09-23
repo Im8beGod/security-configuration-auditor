@@ -192,7 +192,8 @@ def test_xml_api_adoption_produces_candidate_facts_and_states(tmp_path, monkeypa
                 assert client.post(f"/api/v1/training/unresolved/{block_id}/adopt", json={"adoption_token": preview["adoption_token"]}).status_code == 403
                 app.dependency_overrides[get_current_user] = lambda: admin
                 class OfflineProvider:
-                    def suggest_mapping(self, context):
+                    def suggest_mapping(self, context, profile):
+                        del context, profile
                         raise AISuggestionUnavailable("offline")
                 app.dependency_overrides[get_ai_suggestion_provider] = OfflineProvider
                 assert client.post(f"/api/v1/training/unresolved/{block_id}/suggest").status_code == 503

@@ -11,12 +11,15 @@ from typing import Annotated
 import httpx
 import jwt
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.security_model import FIELD_REGISTRY
 from app.training.dsl import MappingDefinition
+
+if TYPE_CHECKING:
+    from app.profile_resolution.registry import ProfileManifest
 
 
 MAX_AI_TEXT = 2048
@@ -39,7 +42,7 @@ class MappingSuggestion(ModelMappingProposal):
 
 
 class AISuggestionProvider(Protocol):
-    def suggest_mapping(self, context: AISuggestionContext) -> MappingSuggestion:
+    def suggest_mapping(self, context: AISuggestionContext, profile: ProfileManifest) -> MappingSuggestion:
         ...
 
 
@@ -48,8 +51,8 @@ class AISuggestionUnavailable(RuntimeError):
 
 
 class DisabledAISuggestionProvider:
-    def suggest_mapping(self, context: AISuggestionContext) -> MappingSuggestion:
-        del context
+    def suggest_mapping(self, context: AISuggestionContext, profile: ProfileManifest | None = None) -> MappingSuggestion:
+        del context, profile
         raise AISuggestionUnavailable("AI mapping suggestions are disabled")
 
 
@@ -60,7 +63,8 @@ class DeterministicFakeSuggestionProvider:
         self._suggestion = suggestion
         self.last_context: AISuggestionContext | None = None
 
-    def suggest_mapping(self, context: AISuggestionContext) -> MappingSuggestion:
+    def suggest_mapping(self, context: AISuggestionContext, profile: ProfileManifest | None = None) -> MappingSuggestion:
+        del profile
         self.last_context = context
         return self._suggestion if isinstance(self._suggestion, MappingSuggestion) else MappingSuggestion.model_validate(self._suggestion)
 
@@ -129,11 +133,15 @@ class AdoptSuggestionRequest(BaseModel):
     adoption_token: str = Field(min_length=1, max_length=180000)
 
 
-def validate_suggestion(suggestion: MappingSuggestion, profile_version_id: str | None) -> MappingSuggestion:
-    from app.profile_resolution import PROFILE_REGISTRY
-    profile = PROFILE_REGISTRY.get(profile_version_id)
+def _context_profile(context: AISuggestionContext, profile: ProfileManifest) -> ProfileManifest:
+    if profile.profile_version_id != context.profile_version_id:
+        raise AISuggestionInvalid("Resolve the reviewed profile before requesting AI assistance")
+    return profile
+
+
+def validate_suggestion(suggestion: MappingSuggestion, profile: ProfileManifest) -> MappingSuggestion:
     definition = MappingDefinition.model_validate(suggestion.definition.model_dump(mode="json"))
-    if profile is None or definition.profile_applicability.profile_version_ids != [profile_version_id]:
+    if definition.profile_applicability.profile_version_ids != [profile.profile_version_id]:
         raise AISuggestionInvalid("Suggestion must apply only to the reviewed profile version")
     if definition.profile_applicability.profile_ids not in ([], [profile.profile_id]):
         raise AISuggestionInvalid("Suggestion profile identity does not match evidence")
@@ -165,12 +173,12 @@ def sign_preview(suggestion, context, user, block, key):
     return SuggestionPreview(evidence_references=references, suggestion=suggestion, redaction_occurred=context.redaction_occurred, truncation_occurred=context.truncation_occurred, adoption_token=jwt.encode(claims, suggestion_signing_key(key), algorithm="HS256"), evidence={"unresolved_text": context.unresolved_text, "surrounding_context": context.surrounding_context, "structural_context": context.structural_context, "unresolved_block_id": str(block.unresolved_block_id), "profile_version_id": block.profile_version_id or ""})
 
 
-def verify_preview(token, user, block, key):
+def verify_preview(token, user, block, key, profile: ProfileManifest):
     try:
         claims = jwt.decode(token, suggestion_signing_key(key), algorithms=["HS256"], options={"require": ["exp", "sub"]})
         if any(claims.get(k) != v for k, v in {"purpose": PROMPT_VERSION, "sub": str(user.user_id), "org": str(user.organization_id), "block": str(block.unresolved_block_id), "fingerprint": block.fingerprint}.items()):
             raise ValueError()
-        return validate_suggestion(MappingSuggestion.model_validate(claims["suggestion"]), block.profile_version_id)
+        return validate_suggestion(MappingSuggestion.model_validate(claims["suggestion"]), profile)
     except (jwt.PyJWTError, ValueError, KeyError) as error:
         raise AISuggestionInvalid("Suggestion expired or invalid; request a new suggestion") from error
 
@@ -207,8 +215,9 @@ class OllamaSuggestionProvider:
         except (AISuggestionUnavailable, AISuggestionInvalid, AttributeError, TypeError):
             return {"available": False, "reason": "Local Ollama is unavailable"}
 
-    def suggest_mapping(self, context):
-        payload = build_prompt(context, self.settings.ai_ollama_model)
+    def suggest_mapping(self, context, profile: ProfileManifest):
+        profile = _context_profile(context, profile)
+        payload = build_prompt(context, self.settings.ai_ollama_model, profile)
         data = self._request("POST", "/api/chat", payload)
         try:
             if data.get("done") is not True or data.get("done_reason") == "length" or data["message"].get("tool_calls"):
@@ -216,7 +225,7 @@ class OllamaSuggestionProvider:
             raw_content = data["message"]["content"]
             proposal = ModelMappingProposal.model_validate(strict_json(raw_content))
             suggestion = MappingSuggestion(**proposal.model_dump(mode="json"))
-            validate_suggestion(suggestion, context.profile_version_id)
+            validate_suggestion(suggestion, profile)
             suggestion.provider_metadata = {"provider": "ollama", "model": self.settings.ai_ollama_model, "prompt_version": PROMPT_VERSION,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "input_digest": hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
@@ -248,12 +257,9 @@ def strict_json(value):
     return json.loads(value, object_pairs_hook=unique, parse_constant=invalid_constant)
 
 
-def build_prompt(context: AISuggestionContext, model: str) -> dict[str, Any]:
+def build_prompt(context: AISuggestionContext, model: str, profile: ProfileManifest) -> dict[str, Any]:
     """Deterministic versioned prompt; all uploaded text stays in the data message."""
-    from app.profile_resolution import PROFILE_REGISTRY
-    profile = PROFILE_REGISTRY.get(context.profile_version_id)
-    if profile is None:
-        raise AISuggestionInvalid("Resolve a supported profile before requesting AI assistance")
+    profile = _context_profile(context, profile)
     fields = context.candidate_fields or tuple(FIELD_REGISTRY)[:64]
     catalog = [{"field_id": name, "types": sorted(t.value for t in FIELD_REGISTRY[name].expected_types), "scopes": sorted(FIELD_REGISTRY[name].allowed_scope_types), "description": FIELD_REGISTRY[name].description[:256]} for name in fields[:64]]
     schema = ModelMappingProposal.model_json_schema()

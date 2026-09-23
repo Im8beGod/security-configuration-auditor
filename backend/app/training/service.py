@@ -20,10 +20,10 @@ from app.db.models.common import utc_now
 from app.jobs.enums import JobType
 from app.jobs.service import enqueue_job
 from app.profile_resolution.registry import PROFILE_REGISTRY
-from app.profile_resolution.runtime import profile_for
+from app.profile_resolution.runtime import RuntimeProfileError, profile_for
 from app.security_model import FIELD_REGISTRY
 from app.training import repository
-from app.training.ai import AISuggestionProvider, MappingSuggestion, sanitized_context, validate_suggestion, sign_preview, verify_preview
+from app.training.ai import AISuggestionInvalid, AISuggestionProvider, MappingSuggestion, sanitized_context, validate_suggestion, sign_preview, verify_preview
 from app.training.dsl import MappingDefinition, ValidationNode, extract, matches
 
 
@@ -80,10 +80,19 @@ def similar_published(db: Session, block: UnresolvedBlock) -> list[dict[str, Any
 def suggest_mapping(db: Session, user: User, block_id: UUID, provider: AISuggestionProvider, signing_key: str):
     _require_admin(user)
     block = get_unresolved(db, user, block_id)
+    try:
+        profile = profile_for(db, user.organization_id, block.profile_version_id or "")
+    except RuntimeProfileError as error:
+        raise TrainingError("Resolved profile is unavailable for AI assistance") from error
+    if profile is None:
+        raise TrainingError("Resolved profile is unavailable for AI assistance")
     structural = {key: block.occurrence[key] for key in ("xml_path", "tag", "command", "parent_command", "scope_type") if key in block.occurrence}
     context = sanitized_context(block.raw_text, block.surrounding_context, block.profile_version_id, block.candidate_field_ids, [], structural_context=json.dumps(structural))
-    suggestion = MappingSuggestion.model_validate(provider.suggest_mapping(context).model_dump(mode="json"))
-    validate_suggestion(suggestion, block.profile_version_id)
+    try:
+        suggestion = MappingSuggestion.model_validate(provider.suggest_mapping(context, profile).model_dump(mode="json"))
+        validate_suggestion(suggestion, profile)
+    except (AISuggestionInvalid, ValidationError, ValueError) as error:
+        raise AISuggestionInvalid("AI suggestion failed schema, DSL, or profile validation") from error
     return sign_preview(suggestion, context, user, block, signing_key)
 
 
@@ -92,7 +101,13 @@ def adopt_suggestion(db: Session, user: User, block_id: UUID, token: str, signin
     block = db.scalar(select(UnresolvedBlock).where(UnresolvedBlock.unresolved_block_id == block_id, UnresolvedBlock.organization_id == user.organization_id).with_for_update())
     if block is None:
         raise TrainingNotFound("Unresolved block not found")
-    suggestion = verify_preview(token, user, block, signing_key)
+    try:
+        profile = profile_for(db, user.organization_id, block.profile_version_id or "")
+    except RuntimeProfileError as error:
+        raise TrainingError("Resolved profile is unavailable for AI adoption") from error
+    if profile is None:
+        raise TrainingError("Resolved profile is unavailable for AI adoption")
+    suggestion = verify_preview(token, user, block, signing_key, profile)
     if block.assigned_mapping_version_id or block.review_status not in {UnresolvedReviewStatus.OPEN, UnresolvedReviewStatus.UNDER_REVIEW}:
         raise TrainingConflict("Evidence is already assigned or no longer actionable")
     metadata = {"confidence": suggestion.confidence, "caveats": suggestion.caveats, "provider": suggestion.provider_metadata, "evidence_refs": block.evidence_refs, "unresolved_block_id": str(block_id)}

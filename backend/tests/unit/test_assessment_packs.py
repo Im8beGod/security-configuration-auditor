@@ -61,7 +61,7 @@ def test_policy_digest_distinguishes_same_rule_with_different_parameters():
 @pytest.mark.parametrize(("profile", "field", "expected"), [
     ("cisco.ios_xe.17@1.0.0", "management.remote.ssh.version", True),
     ("fortinet.fortios.7@1.0.0", "management.remote.ssh.version", False),
-    ("juniper.junos.18@1.0.0", "logging.remote.destination", True),
+    ("juniper.junos.18@1.0.0", "management.remote.telnet.enabled", True),
     ("arista.eos.4@1.0.0", "logging.enabled", False),
 ])
 def test_automatic_obligations_require_profile_supported_canonical_evidence(profile, field, expected):

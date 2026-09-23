@@ -233,6 +233,7 @@ FORTIOS_7 = ProfileManifest(
         "canonical_fields": (
             "management.remote.telnet.enabled",
             "management.remote.ssh.enabled",
+            "management.remote.http.enabled",
             "management.session.idle_timeout",
             "management.remote.https.enabled",
             "management.remote.tls.minimum_version",
@@ -262,7 +263,7 @@ JUNIPER_JUNOS_18 = ProfileManifest(
     coverage_manifest=MappingProxyType({
         "supported_version_family": "Junos 18.4 XML configuration",
         "structural_reader": "xml_tree.v1",
-        "canonical_fields": ("management.remote.ssh.enabled", "management.session.idle_timeout", "logging.remote.destination", "time.ntp.server", "time.ntp.configured"),
+        "canonical_fields": ("management.remote.ssh.enabled", "management.remote.telnet.enabled", "management.session.idle_timeout", "logging.remote.destination", "time.ntp.server", "time.ntp.configured"),
         "limitations": ("reviewed 18.4R1-S2.4 scope only", "model and serial require bounded chassis-inventory XML", "unsupported structures remain UNKNOWN"),
     }),
     xml_identity_selectors=(

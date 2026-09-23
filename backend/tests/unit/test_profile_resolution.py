@@ -1,6 +1,8 @@
 from hashlib import sha256
 from uuid import UUID, uuid4
 
+import pytest
+
 from app.db.models import (
     Artifact,
     ArtifactContentFamily,
@@ -26,6 +28,7 @@ from app.profile_resolution import (
     resolve_profile,
 )
 from app.profile_resolution.evidence import EvidenceDocument
+from app.interpretation.service import load_validated_knowledge_pack
 
 
 def _document(
@@ -115,6 +118,22 @@ def test_registry_identity_and_capability_are_stable_and_bounded():
     assert "no documented defaults, inheritance, references, or bindings" in coverage["limitations"]
     assert CISCO_IOS_XE_17.structural_reader_name == "indentation_cli.v1"
     assert CISCO_IOS_XE_17.knowledge_pack_name == "cisco_iosxe_17@1.3.0"
+
+
+@pytest.mark.parametrize("profile", (
+    CISCO_IOS_XE_17, FORTIOS_7, JUNIPER_JUNOS_18, ARISTA_EOS_4,
+))
+def test_declared_canonical_coverage_matches_active_semantic_mappings(profile):
+    mapping_fields = {
+        mapping.field_id
+        for mapping in load_validated_knowledge_pack(profile.profile_version_id).mappings
+    }
+    declared_fields = set(profile.coverage_manifest["canonical_fields"])
+    justified = profile.coverage_manifest.get("canonical_field_justifications", {})
+
+    assert mapping_fields <= declared_fields
+    assert declared_fields - mapping_fields == set(justified)
+    assert all(isinstance(reason, str) and reason for reason in justified.values())
 
 
 def test_fortios_status_identity_includes_hostname_model_serial_and_build():

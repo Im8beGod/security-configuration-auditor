@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.compliance.verdicts import FindingVerdict
 from app.db.models import Audit, Finding, RemediationProcedure, RemediationProcedureStatus, User
 from app.findings.service import FindingNotFoundError, _finding
-from app.remediation.catalog import REMEDIATION_PROCEDURE_REGISTRY
+from app.remediation.catalog import REMEDIATION_PROCEDURE_REGISTRY, unavailable_remediation_reason
 
 class RemediationError(ValueError): pass
 _PLACEHOLDER = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
@@ -79,9 +79,8 @@ def _select(db, finding, audit):
             )
             if procedure is None:
                 reason = (
-                    "unsupported_profile"
-                    if REMEDIATION_PROCEDURE_REGISTRY.by_rule.get(finding.rule_id)
-                    else "no_published_procedure"
+                    unavailable_remediation_reason(_profile(audit), finding.rule_id)
+                    or ("unsupported_profile" if REMEDIATION_PROCEDURE_REGISTRY.by_rule.get(finding.rule_id) else "no_published_procedure")
                 )
                 return None, reason, None
             source = "built_in_reviewed_catalog"
@@ -220,7 +219,10 @@ def _restore_preview(db, finding, audit, stored, *, policy_parameters=None):
     if not isinstance(stored, dict) or not stored or finding.verdict != FindingVerdict.FAIL:
         return None
     try:
-        procedure = db.get(RemediationProcedure, UUID(str(stored["procedure_id"])))
+        procedure_id = UUID(str(stored["procedure_id"]))
+        procedure = db.get(RemediationProcedure, procedure_id)
+        if procedure is None:
+            procedure = REMEDIATION_PROCEDURE_REGISTRY.by_id.get(procedure_id)
         version = int(stored["procedure_version"])
     except (KeyError, TypeError, ValueError):
         return {"status": "unavailable", "reason": "persisted_preview_invalid", "finding_id": finding.finding_id}

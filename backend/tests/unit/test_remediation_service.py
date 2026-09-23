@@ -184,7 +184,7 @@ def test_failed_rules_without_reviewed_procedures_are_explicitly_unavailable():
         db, SimpleNamespace(organization_id=UUID(int=1)), finding.finding_id, {}
     )
     assert response == {
-        "status": "unavailable", "reason": "no_published_procedure",
+        "status": "unavailable", "reason": "arista_management_acl_definition_and_attachment_require_review",
         "finding_id": finding.finding_id,
     }
     finding.verdict = "unknown"

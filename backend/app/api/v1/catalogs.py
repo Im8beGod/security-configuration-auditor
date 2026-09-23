@@ -12,6 +12,7 @@ from app.auth.dependencies import require_roles
 from app.db.models import User, UserRole
 from app.db.session import get_db
 from app.profile_resolution.runtime import profile_for
+from app.compliance.runtime_rules import runtime_rule_for
 
 
 router = APIRouter(prefix="/assessment-packs", tags=["assessment-packs"])
@@ -22,6 +23,7 @@ async def _runtime_catalog(file: UploadFile, db: Session, organization_id):
     return parse_runtime_catalog(
         await file.read(MAX_EXTERNAL_CATALOG_BYTES + 1), file.filename or "assessment-pack.json",
         profile_lookup=lambda profile_version_id: profile_for(db, organization_id, profile_version_id),
+        rule_lookup=lambda rule_id, profile_version_id: runtime_rule_for(db, organization_id, rule_id, profile_version_id),
     )
 
 

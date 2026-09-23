@@ -34,6 +34,7 @@ PHASE1_REMEDIATION_FIX_REVISION = "20260920_0021"
 ARISTA_EOS_REVISION = "20260920_0022"
 MULTIFRAMEWORK_REVISION = "20260920_0023"
 REMEDIATION_PREVIEW_REVISION = "20260922_0024"
+RUNTIME_RULE_REVISION = "20260923_0025"
 
 
 def get_script_directory() -> ScriptDirectory:
@@ -50,11 +51,11 @@ def test_migration_history_extends_parentless_baseline() -> None:
     script = get_script_directory()
     revisions = list(script.walk_revisions())
 
-    assert script.get_heads() == [REMEDIATION_PREVIEW_REVISION]
-    assert len(revisions) == 24
-    expected = [REMEDIATION_PREVIEW_REVISION, MULTIFRAMEWORK_REVISION, ARISTA_EOS_REVISION, PHASE1_REMEDIATION_FIX_REVISION, H2_WORKER_LEASE_REVISION, H1_SCHEMA_DRIFT_REVISION, B10_REMEDIATION_REVISION, ISO_ALIGNMENT_REVISION, CIS_PACK_REVISION, DISA_PACK_REVISION, NIST_PACK_REVISION, PROFILE_MANIFEST_REVISION, ASSESSMENT_PACK_REVISION, STEP_11_1_REVISION, STEP_10A_REVISION, STEP_9_2_REVISION, STEP_9_1_REVISION, STEP_7_1_REVISION, STEP_6A_REVISION, STEP_5C_REVISION, STEP_3_9_REVISION, STEP_3_6_REVISION, CURRENT_REVISION, BASELINE_REVISION]
+    assert script.get_heads() == [RUNTIME_RULE_REVISION]
+    assert len(revisions) == 25
+    expected = [RUNTIME_RULE_REVISION, REMEDIATION_PREVIEW_REVISION, MULTIFRAMEWORK_REVISION, ARISTA_EOS_REVISION, PHASE1_REMEDIATION_FIX_REVISION, H2_WORKER_LEASE_REVISION, H1_SCHEMA_DRIFT_REVISION, B10_REMEDIATION_REVISION, ISO_ALIGNMENT_REVISION, CIS_PACK_REVISION, DISA_PACK_REVISION, NIST_PACK_REVISION, PROFILE_MANIFEST_REVISION, ASSESSMENT_PACK_REVISION, STEP_11_1_REVISION, STEP_10A_REVISION, STEP_9_2_REVISION, STEP_9_1_REVISION, STEP_7_1_REVISION, STEP_6A_REVISION, STEP_5C_REVISION, STEP_3_9_REVISION, STEP_3_6_REVISION, CURRENT_REVISION, BASELINE_REVISION]
     assert [item.revision for item in revisions] == expected
-    assert revisions[0].down_revision == MULTIFRAMEWORK_REVISION
+    assert revisions[0].down_revision == REMEDIATION_PREVIEW_REVISION
     assert revisions[-1].down_revision is None
 
 
@@ -63,6 +64,6 @@ def test_canonical_metadata_has_identity_tables_and_naming_convention() -> None:
         "artifacts", "audits", "devices", "effective_states", "findings", "jobs", "organizations", "security_facts",
         "snapshots", "users", "remediation_procedures", "reports", "unresolved_blocks",
         "mapping_versions", "mapping_validation_runs", "knowledge_packs", "knowledge_pack_versions",
-        "assessment_pack_versions", "assessment_obligations", "audit_assessments", "audit_framework_assessments", "assessment_results", "profile_manifest_versions", "profile_resolution_decisions"
+        "assessment_pack_versions", "assessment_obligations", "audit_assessments", "audit_framework_assessments", "assessment_results", "profile_manifest_versions", "profile_resolution_decisions", "runtime_rule_versions"
     }
     assert dict(Base.metadata.naming_convention) == NAMING_CONVENTION

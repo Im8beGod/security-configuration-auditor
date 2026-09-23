@@ -17,6 +17,7 @@ from app.db.models import AssessmentObligation, AssessmentPackVersion
 from app.compliance.rule_registry import RULE_PACK_BY_PROFILE
 from app.profile_resolution import PROFILE_REGISTRY
 from app.profile_resolution.runtime import RuntimeProfileError, profile_for
+from app.compliance.runtime_rules import RuntimeRuleError, runtime_rule_for
 
 
 CATALOG_DIRECTORY = Path(__file__).resolve().parent
@@ -219,13 +220,19 @@ def _runtime_profiles(value: Any, *, profile_lookup: Callable[[str], object | No
     return profiles
 
 
-def _runtime_rule(rule_id: str, profiles: tuple[str, ...]):
+def _runtime_rule(rule_id: str, profiles: tuple[str, ...], rule_lookup=None):
     rules = []
     for profile_version_id in profiles:
-        pack = RULE_PACK_BY_PROFILE.get(profile_version_id)
-        rule = next((item for item in (pack.rules if pack else ()) if item.rule_id == rule_id), None)
-        if rule is None:
-            raise CatalogImportError("Runtime obligation evaluator is unavailable for an applicable profile")
+        if rule_lookup is None:
+            pack = RULE_PACK_BY_PROFILE.get(profile_version_id)
+            rule = next((item for item in (pack.rules if pack else ()) if item.rule_id == rule_id), None)
+            if rule is None:
+                raise CatalogImportError("Runtime obligation evaluator is unavailable for an applicable profile")
+        else:
+            try:
+                rule = rule_lookup(rule_id, profile_version_id)
+            except RuntimeRuleError as exc:
+                raise CatalogImportError("Runtime obligation evaluator is unavailable for an applicable profile") from exc
         rules.append(rule)
     first = rules[0]
     if any(
@@ -274,6 +281,7 @@ def _runtime_policy(value: Any, rule: Any) -> dict[str, Any]:
 def parse_runtime_catalog(
     content: bytes, filename: str, *,
     profile_lookup: Callable[[str], object | None] = PROFILE_REGISTRY.get,
+    rule_lookup=None,
 ) -> RuntimeCatalog:
     """Validate the bounded JSON schema used for tenant-published assessment packs."""
     if not content or len(content) > MAX_EXTERNAL_CATALOG_BYTES:
@@ -325,7 +333,7 @@ def parse_runtime_catalog(
         evaluator = item.get("evaluator_rule_id")
         if method == "automatic" and implementation == "implemented":
             evaluator = _runtime_text(evaluator, "evaluator rule ID", limit=255)
-            rule = _runtime_rule(evaluator, applicable_profiles)
+            rule = _runtime_rule(evaluator, applicable_profiles, rule_lookup)
             policy = _runtime_policy(item.get("policy_parameters"), rule)
         elif evaluator is not None or method != "manual" or implementation == "implemented":
             raise CatalogImportError("Manual or unimplemented obligations cannot define automatic evaluators")
@@ -374,6 +382,9 @@ def publish_runtime_catalog(db: Session, organization_id: UUID, catalog: Runtime
             raise CatalogImportError("Runtime catalog references an unsupported profile")
     except RuntimeProfileError as exc:
         raise CatalogImportError("Runtime catalog references an unsupported profile") from exc
+    for obligation in catalog.obligations:
+        if obligation["assessment_method"] == "automatic":
+            _runtime_rule(obligation["evaluator_rule_id"], tuple(obligation["profile_version_ids"]), lambda rule_id, profile_id: runtime_rule_for(db, organization_id, rule_id, profile_id))
     existing = db.scalar(select(AssessmentPackVersion.assessment_pack_version_id).where(
         AssessmentPackVersion.organization_id == organization_id,
         AssessmentPackVersion.pack_key == catalog.pack_key,

@@ -27,6 +27,7 @@ from app.db.models import (
 )
 from app.effective_state.contracts import ResolutionStatus, UnresolvedReason
 from app.profile_resolution import PROFILE_REGISTRY
+from app.compliance.runtime_rules import RuntimeRuleError, runtime_rule_for
 
 
 class AssessmentPackError(ValueError):
@@ -201,28 +202,28 @@ def pin_assessment(db: Session, audit: Audit, profile_version_id: str) -> AuditA
     return first
 
 
-def _rule_for(rule_id: str, profile_version_id: str) -> RuleDefinition:
-    from app.compliance.rule_registry import RULE_PACK_BY_PROFILE
-    pack = RULE_PACK_BY_PROFILE.get(profile_version_id)
-    if pack is None:
-        raise AssessmentPackError("assessment_evaluator_unavailable", "Assessment evaluator is unavailable for this profile")
-    for rule in pack.rules:
-        if rule.rule_id == rule_id:
-            return rule
-    raise AssessmentPackError("assessment_evaluator_unavailable", "Assessment evaluator binding is unavailable")
+def _rule_for(db: Session, organization_id: UUID, rule_id: str, profile_version_id: str) -> RuleDefinition:
+    try:
+        return runtime_rule_for(db, organization_id, rule_id, profile_version_id)
+    except RuntimeRuleError as exc:
+        raise AssessmentPackError("assessment_evaluator_unavailable", "Assessment evaluator binding is unavailable") from exc
 
 
-def _automatic_evidence_supported(obligation: AssessmentObligationRow, profile_version_id: str) -> bool:
+def _automatic_evidence_supported(obligation: AssessmentObligationRow, profile_version_id: str, db: Session | None = None, organization_id: UUID | None = None) -> bool:
     """Only assess automatic obligations against facts sealed for this profile."""
     profile = PROFILE_REGISTRY.get(profile_version_id)
     required = (obligation.policy_parameters or {}).get("required_canonical_fields", [])
     if not isinstance(required, list) or not required:
         try:
-            required = list(_rule_for(obligation.evaluator_rule_id or "", profile_version_id).required_effective_states)
+            if db is None or organization_id is None:
+                return False
+            required = list(_rule_for(db, organization_id, obligation.evaluator_rule_id or "", profile_version_id).required_effective_states)
         except AssessmentPackError:
             return False
-    if profile is None or not required:
+    if not required:
         return False
+    if profile is None:
+        return db is not None and organization_id is not None
     supported = set(profile.coverage_manifest.get("canonical_fields", ()))
     return all(isinstance(field, str) and field in supported for field in required)
 
@@ -304,12 +305,12 @@ def persist_assessment_results(
             applicability is ApplicabilityStatus.APPLICABLE
             and obligation.implementation_status == ImplementationStatus.IMPLEMENTED.value
             and obligation.assessment_method == AssessmentMethod.AUTOMATIC.value
-            and not _automatic_evidence_supported(obligation, profile_version_id)
+            and not _automatic_evidence_supported(obligation, profile_version_id, db, organization_id)
         ):
             applicability = ApplicabilityStatus.NOT_APPLICABLE
             details["not_applicable_reason"] = "canonical_evidence_unsupported"
         if applicability is ApplicabilityStatus.APPLICABLE and obligation.implementation_status == ImplementationStatus.IMPLEMENTED.value and obligation.assessment_method == AssessmentMethod.AUTOMATIC.value:
-            rule = _rule_for(obligation.evaluator_rule_id or "", profile_version_id)
+            rule = _rule_for(db, organization_id, obligation.evaluator_rule_id or "", profile_version_id)
             field_states = [state for state in states if state.field_id in rule.required_effective_states]
             rule_findings = findings_by_rule.get(rule.rule_id, [])
             finding = next(

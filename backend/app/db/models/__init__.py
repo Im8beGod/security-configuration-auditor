@@ -50,6 +50,7 @@ from app.db.models.assessment import (
     AuditFrameworkAssessment,
 )
 from app.db.models.profile import ProfileManifestVersion, ProfileResolutionDecision
+from app.db.models.runtime_rule import RuntimeRuleVersion
 from app.jobs.enums import JobStatus, JobType
 
 __all__ = [
@@ -101,4 +102,5 @@ __all__ = [
     "AuditFrameworkAssessment",
     "ProfileManifestVersion",
     "ProfileResolutionDecision",
+    "RuntimeRuleVersion",
 ]

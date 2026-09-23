@@ -11,6 +11,7 @@ from app.api.v1.snapshots import router as snapshots_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.training import router as training_router
 from app.api.v1.catalogs import router as catalogs_router
+from app.api.v1.runtime_rules import router as runtime_rules_router
 
 
 router = APIRouter()
@@ -25,3 +26,4 @@ router.include_router(snapshots_router)
 router.include_router(reports_router)
 router.include_router(training_router)
 router.include_router(catalogs_router)
+router.include_router(runtime_rules_router)

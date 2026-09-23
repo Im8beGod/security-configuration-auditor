@@ -160,6 +160,11 @@ def validate_suggestion(suggestion: MappingSuggestion, profile: ProfileManifest)
         raise AISuggestionInvalid("Suggestion structural operation does not match the profile reader")
     if expected_operation is None and definition.structural_match.operation in {"xml_path", "json_path"}:
         raise AISuggestionInvalid("Suggestion structural operation does not match the profile reader")
+    if profile.structural_reader_name == "indentation_cli.v1":
+        required_families = {"positive", "alternate_values", "negative", "wrong_scope", "negation", "conflict", "regression"}
+        missing_families = sorted(required_families - {example.family for example in definition.examples})
+        if missing_families:
+            raise AISuggestionInvalid("CLI suggestion is missing executable validation examples: " + ", ".join(missing_families))
     return suggestion
 
 
@@ -291,7 +296,8 @@ def _validated_model_suggestion(data: Any, profile: ProfileManifest) -> tuple[Ma
         details = "; ".join(f"{'.'.join(str(part) for part in item['loc'])}: {item['type']}" for item in error.errors(include_input=False)[:8])[:512]
         raise _ProposalValidationError("The prior proposal violated schema or DSL constraints: " + details) from error
     except AISuggestionInvalid as error:
-        raise _ProposalValidationError("The prior proposal violated reviewed-profile applicability or reader constraints") from error
+        reason = str(error)[:512] or "The prior proposal violated reviewed-profile applicability or reader constraints"
+        raise _ProposalValidationError(reason) from error
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
         raise _ProposalValidationError("The prior response was not a valid schema-conforming JSON proposal") from error
 
@@ -307,7 +313,7 @@ def build_prompt(context: AISuggestionContext, model: str, profile: ProfileManif
     catalog = [{"field_id": name, "types": sorted(t.value for t in FIELD_REGISTRY[name].expected_types), "scopes": sorted(FIELD_REGISTRY[name].allowed_scope_types), "description": FIELD_REGISTRY[name].description[:256]} for name in fields[:64]]
     schema = ModelMappingProposal.model_json_schema()
     reader_guidance = {
-        "indentation_cli.v1": "Use only command_equality or command_prefix. Do not emit xml_path or json_path. Match the observed command and use bounded literal/one_of/capture argument patterns only when needed. Include executable examples covering every validation family with expected_match and expected_value where applicable.",
+        "indentation_cli.v1": "Use only command_equality or command_prefix. Do not emit xml_path or json_path. Match the observed command and use bounded literal/one_of/capture argument patterns only when needed. The examples array must include executable examples for each family: positive, alternate_values, negative, wrong_scope, negation, conflict, and regression, with expected_match and expected_value where applicable.",
         "xml_tree.v1": "Use only xml_path with the exact observed path. Do not emit CLI or JSON structural operations.",
         "json_tree.v1": "Use only json_path with the exact observed path. Do not emit CLI or XML structural operations.",
     }.get(profile.structural_reader_name, "Use only operations compatible with the reviewed reader.")

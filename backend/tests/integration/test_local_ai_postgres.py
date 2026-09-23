@@ -327,6 +327,8 @@ def test_runtime_cli_ai_training_lifecycle(tmp_path, monkeypatch, real_ollama):
                 preview_response = client.post(f"/api/v1/training/unresolved/{block_id}/suggest")
                 assert preview_response.status_code == 200, preview_response.text
                 preview = preview_response.json()
+                assert preview["suggestion"]["provider_metadata"]["provider"] == "ollama"
+                assert preview["suggestion"]["provider_metadata"]["model"] == get_settings().ai_ollama_model
                 assert before == db.scalar(select(func.count()).select_from(MappingVersion).where(MappingVersion.organization_id == organization_id))
                 assert 1 <= int(preview["suggestion"]["provider_metadata"]["attempt_count"]) <= 2
                 app.dependency_overrides[get_current_user] = lambda: other

@@ -5,8 +5,9 @@ interface PlaceholderPageProps {
 
 export function PlaceholderPage({ title, description }: PlaceholderPageProps) {
   return (
-    <section>
-      <h1>{title}</h1>
+    <section className="state-panel" aria-labelledby="placeholder-title">
+      <span className="eyebrow">Workspace</span>
+      <h1 id="placeholder-title">{title}</h1>
       <p>{description}</p>
     </section>
   )

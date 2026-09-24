@@ -5,12 +5,12 @@ import { canAccessTraining, userRoleLabel } from '../features/auth/roles'
 import type { AuthUser } from '../shared/types/auth'
 
 const primaryNavigation = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/uploads', label: 'Upload / Evidence' },
-  { to: '/devices', label: 'Devices' },
-  { to: '/audits', label: 'Audits' },
-  { to: '/findings', label: 'Findings' },
-  { to: '/reports', label: 'Reports' },
+  { to: '/dashboard', label: 'Dashboard', icon: '⌂' },
+  { to: '/uploads', label: 'Upload / Evidence', icon: '↥' },
+  { to: '/devices', label: 'Devices', icon: '◈' },
+  { to: '/audits', label: 'Audits', icon: '◷' },
+  { to: '/findings', label: 'Findings', icon: '!' },
+  { to: '/reports', label: 'Reports', icon: '▤' },
 ] as const
 
 export function AuthenticatedAppLayout() {
@@ -26,6 +26,7 @@ export function AuthenticatedAppLayout() {
             <span>SIH 26155</span>
           </div>
         </div>
+        <div className="shell-status" aria-label="System status"><span className="status-pulse" />Audit engine online</div>
         <div className="account-summary">
           <div>
             <strong>{currentUser.email}</strong>
@@ -41,15 +42,15 @@ export function AuthenticatedAppLayout() {
           <ul>
             {primaryNavigation.map((item) => (
               <li key={item.to}>
-                <NavLink to={item.to}>{item.label}</NavLink>
+                <NavLink to={item.to}><span className="nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span></NavLink>
               </li>
             ))}
             {canAccessTraining(currentUser.role) && (
               <li className="nav-advanced">
-                <NavLink to="/training">Training</NavLink>
+                <NavLink to="/training"><span className="nav-icon" aria-hidden="true">◇</span><span>Training</span></NavLink>
               </li>
             )}
-            {currentUser.role === 'admin' && <li className="nav-advanced"><NavLink to="/admin/runtime">Runtime publishing</NavLink></li>}
+            {currentUser.role === 'admin' && <li className="nav-advanced"><NavLink to="/admin/runtime"><span className="nav-icon" aria-hidden="true">⚙</span><span>Runtime publishing</span></NavLink></li>}
           </ul>
         </nav>
 

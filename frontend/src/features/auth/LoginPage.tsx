@@ -37,8 +37,9 @@ export function LoginPage() {
 
   if (currentUser.isPending) {
     return (
-      <main aria-live="polite">
-        <p>Checking your session…</p>
+      <main className="login-page login-loading" aria-live="polite">
+        <span className="eyebrow">Secure workspace</span>
+        <p>Checking your session...</p>
       </main>
     )
   }
@@ -72,42 +73,64 @@ export function LoginPage() {
 
   return (
     <main className="login-page">
-      <h1>Sign in</h1>
-      <p>Use your SIH 26155 account to continue.</p>
-      <form onSubmit={submit} noValidate>
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="username"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          aria-describedby={error ? 'login-error' : undefined}
-        />
+      <section className="login-intro" aria-labelledby="login-title">
+        <span className="brand-note">SIH 26155 · Security operations</span>
+        <span className="eyebrow">Evidence to assurance</span>
+        <h1 id="login-title">Make every configuration decision defensible.</h1>
+        <p>
+          Normalize network evidence, surface real findings, and keep every remediation step
+          reviewable from one controlled workspace.
+        </p>
+        <div className="login-flow" aria-label="Platform workflow">
+          <span><b>01</b> Evidence</span>
+          <i aria-hidden="true">→</i>
+          <span><b>02</b> Normalize</span>
+          <i aria-hidden="true">→</i>
+          <span><b>03</b> Assure</span>
+        </div>
+      </section>
+      <section className="login-card" aria-labelledby="welcome-title">
+        <div className="login-card-head">
+          <span className="eyebrow">Protected workspace</span>
+          <h2 id="welcome-title">Welcome back</h2>
+          <p>Sign in to continue to your organization&apos;s audit console.</p>
+        </div>
+        <form onSubmit={submit} noValidate>
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="username"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            aria-describedby={error ? 'login-error' : undefined}
+          />
 
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          aria-describedby={error ? 'login-error' : undefined}
-        />
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            aria-describedby={error ? 'login-error' : undefined}
+          />
 
-        {error && (
-          <p id="login-error" role="alert">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={login.isPending}>
-          {login.isPending ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+          {error && (
+            <p id="login-error" role="alert">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={login.isPending}>
+            {login.isPending ? 'Signing in...' : 'Sign in'}
+          </button>
+        </form>
+        <p className="login-foot">Access is tenant-scoped and protected by your organization&apos;s policies.</p>
+      </section>
     </main>
   )
 }

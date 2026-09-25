@@ -36,10 +36,10 @@ export function AuthenticatedAppLayout() {
     <div className="app-shell">
       <header className="app-header">
         <div className="project-identity">
-          <span className="project-mark" aria-hidden="true">SIH</span>
+          <span className="project-mark" aria-hidden="true">L</span>
           <div>
-            <strong>Security Configuration Auditor</strong>
-            <span>SIH 26155</span>
+            <strong>L.O.G.O.S.</strong>
+            <span>Network compliance auditor</span>
           </div>
         </div>
         <div className="shell-status" aria-label="System status"><span className="status-pulse" />Audit engine online</div>
@@ -63,7 +63,7 @@ export function AuthenticatedAppLayout() {
             ))}
             {canAccessTraining(currentUser.role) && (
               <li className="nav-advanced">
-                <NavLink to="/training"><span className="nav-icon"><NavIcon name="training" /></span><span>Training</span></NavLink>
+                <NavLink to="/training"><span className="nav-icon"><NavIcon name="training" /></span><span>Mapping review</span></NavLink>
               </li>
             )}
             {currentUser.role === 'admin' && <li className="nav-advanced"><NavLink to="/admin/runtime"><span className="nav-icon"><NavIcon name="runtime" /></span><span>Runtime publishing</span></NavLink></li>}

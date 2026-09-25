@@ -74,8 +74,8 @@ export function LoginPage() {
   return (
     <main className="login-page">
       <section className="login-intro" aria-labelledby="login-title">
-        <span className="brand-note">SIH 26155 · Security operations</span>
-        <span className="eyebrow">Evidence to assurance</span>
+        <span className="brand-note">L.O.G.O.S.</span>
+        <span className="eyebrow">Network Security Compliance Auditor</span>
         <h1 id="login-title">Make every configuration decision defensible.</h1>
         <p>
           Normalize network evidence, surface real findings, and keep every remediation step

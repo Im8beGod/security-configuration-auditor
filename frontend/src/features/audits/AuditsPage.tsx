@@ -14,60 +14,35 @@ export function AuditsPage() {
   const audits = useQuery({ queryKey: workflowKeys.audits, queryFn: listAudits })
   const devices = useQuery({ queryKey: workflowKeys.devices, queryFn: listDevices })
   const assessmentPacks = useQuery({ queryKey: workflowKeys.assessmentPacks, queryFn: () => listAssessmentPacks() })
-  const snapshotQueries = useQueries({
-    queries: (devices.data ?? []).map((device) => ({
-      queryKey: workflowKeys.snapshots(device.device_id),
-      queryFn: () => listSnapshots(device.device_id),
-    })),
-  })
+  const snapshotQueries = useQueries({ queries: (devices.data ?? []).map((device) => ({ queryKey: workflowKeys.snapshots(device.device_id), queryFn: () => listSnapshots(device.device_id) })) })
   const [selectedSnapshots, setSelectedSnapshots] = useState<string[]>([])
   const [batchResults, setBatchResults] = useState<BatchAuditResponse | null>(null)
   const [frameworksBySnapshot, setFrameworksBySnapshot] = useState<Record<string, string[]>>({})
   const [assessmentPackBySnapshot, setAssessmentPackBySnapshot] = useState<Record<string, string>>({})
-  const readySnapshots: ReadySnapshot[] = snapshotQueries.flatMap((query, index) => {
-    const device = devices.data?.[index]
-    return device ? (query.data ?? []).filter((snapshot) => snapshot.status === 'ready').map((snapshot) => ({ device, snapshot })) : []
-  })
+  const readySnapshots: ReadySnapshot[] = snapshotQueries.flatMap((query, index) => { const device = devices.data?.[index]; return device ? (query.data ?? []).filter((snapshot) => snapshot.status === 'ready').map((snapshot) => ({ device, snapshot })) : [] })
   const snapshotById = new Map(readySnapshots.map((item) => [item.snapshot.snapshot_id, item]))
   const batch = useMutation({
-    mutationFn: () => createBatchAudits(selectedSnapshots.flatMap((snapshotId) => {
-      const item = snapshotById.get(snapshotId)
-      const assessmentPackVersionId = assessmentPackBySnapshot[snapshotId]
-      return item ? [{ device_id: item.device.device_id, snapshot_id: item.snapshot.snapshot_id, selected_frameworks: assessmentPackVersionId ? [] : (frameworksBySnapshot[snapshotId] ?? []), ...(assessmentPackVersionId ? { assessment_pack_version_id: assessmentPackVersionId } : {}) }] : []
-    })),
-    onSuccess: (result) => {
-      setBatchResults(result)
-      setSelectedSnapshots([])
-      setFrameworksBySnapshot({})
-      setAssessmentPackBySnapshot({})
-      void queryClient.invalidateQueries({ queryKey: workflowKeys.audits })
-    },
+    mutationFn: () => createBatchAudits(selectedSnapshots.flatMap((snapshotId) => { const item = snapshotById.get(snapshotId); const assessmentPackVersionId = assessmentPackBySnapshot[snapshotId]; return item ? [{ device_id: item.device.device_id, snapshot_id: item.snapshot.snapshot_id, selected_frameworks: assessmentPackVersionId ? [] : (frameworksBySnapshot[snapshotId] ?? []), ...(assessmentPackVersionId ? { assessment_pack_version_id: assessmentPackVersionId } : {}) }] : [] })),
+    onSuccess: (result) => { setBatchResults(result); setSelectedSnapshots([]); setFrameworksBySnapshot({}); setAssessmentPackBySnapshot({}); void queryClient.invalidateQueries({ queryKey: workflowKeys.audits }) },
   })
   const names = new Map(devices.data?.map((device) => [device.device_id, device.display_name]))
   const snapshotsPending = snapshotQueries.some((query) => query.isPending)
   const snapshotsError = snapshotQueries.find((query) => query.error)?.error
 
-  function toggleSnapshot(snapshotId: string, checked: boolean) {
-    setSelectedSnapshots((current) => checked ? [...current, snapshotId] : current.filter((id) => id !== snapshotId))
-  }
+  function toggleSnapshot(snapshotId: string, checked: boolean) { setSelectedSnapshots((current) => checked ? [...current, snapshotId] : current.filter((id) => id !== snapshotId)) }
 
-  return <section className="page-stack">
-    <header className="page-heading"><div><span className="eyebrow">Compliance assessments</span><h1>Audits</h1></div><p>Submit ready Cisco and FortiOS snapshots together. Each item keeps its own audit and job result.</p></header>
-    <section className="panel">
-      <div className="section-title"><div><span className="eyebrow">Batch submission</span><h2>Select ready snapshots</h2></div><span>{selectedSnapshots.length} selected</span></div>
-      {snapshotsError ? <p className="error-message" role="alert">{errorMessage(snapshotsError)}</p> : snapshotsPending ? <p className="quiet-state" aria-live="polite">Loading ready snapshots...</p> : readySnapshots.length === 0 ? <p className="quiet-state">No ready snapshots are available. Finalize evidence from a device first.</p> : <div className="selection-list">{readySnapshots.map(({ device, snapshot }) => <label key={snapshot.snapshot_id}><input type="checkbox" checked={selectedSnapshots.includes(snapshot.snapshot_id)} onChange={(event) => toggleSnapshot(snapshot.snapshot_id, event.target.checked)} /><span><strong>{device.display_name}</strong><small>{snapshot.label ?? `Snapshot ${shortId(snapshot.snapshot_id)}`} - {snapshot.artifact_count} evidence file{snapshot.artifact_count === 1 ? '' : 's'}</small><select aria-label={`Assessment pack for ${device.display_name}`} value={assessmentPackBySnapshot[snapshot.snapshot_id] ?? ''} onChange={(event) => setAssessmentPackBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: event.target.value }))}><option value="">Framework selection</option>{(assessmentPacks.data ?? []).map((pack) => <option key={pack.assessment_pack_version_id} value={pack.assessment_pack_version_id}>{pack.family}: {pack.name} v{pack.version}</option>)}</select><select multiple aria-label={`Frameworks for ${device.display_name}`} disabled={Boolean(assessmentPackBySnapshot[snapshot.snapshot_id])} value={frameworksBySnapshot[snapshot.snapshot_id] ?? []} onChange={(event) => setFrameworksBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: Array.from(event.target.selectedOptions, (option) => option.value) }))}><option value="cis">CIS Benchmarks</option><option value="nist">NIST SP 800-53</option><option value="disa">DISA STIG/SRG</option><option value="iso">ISO/IEC 27001</option></select></span><StatusBadge value="ready" /></label>)}</div>}
-      {assessmentPacks.isError && <p className="error-message" role="alert">Assessment Pack choices are unavailable: {errorMessage(assessmentPacks.error)}</p>}
-      {batch.isError && <p className="error-message" role="alert">{errorMessage(batch.error)}</p>}
-      <button className="button-primary" disabled={selectedSnapshots.length < 2 || batch.isPending} onClick={() => batch.mutate()}>{batch.isPending ? 'Submitting batch...' : `Submit ${selectedSnapshots.length || ''} selected audits`}</button>
-      <p className="quiet-state">Select at least two ready snapshots. Rejected items remain visible and do not discard accepted work.</p>
+  return (
+    <section className="page-stack audit-page">
+      <header className="page-heading"><div className="heading-copy"><span className="eyebrow">Compliance assessments</span><h1>Audits</h1><p>Submit ready Cisco and FortiOS snapshots together. Each item keeps its own audit and job result.</p></div></header>
+      <section className="panel audit-builder">
+        <div className="section-title selection-heading"><div><span className="eyebrow">Batch submission</span><h2>Select ready snapshots</h2><p>Choose at least two finalized evidence sets and their assessment framework.</p></div><span className="selection-count"><strong>{selectedSnapshots.length}</strong> selected</span></div>
+        {snapshotsError ? <p className="error-message" role="alert">{errorMessage(snapshotsError)}</p> : snapshotsPending ? <p className="quiet-state" aria-live="polite">Loading ready snapshots...</p> : readySnapshots.length === 0 ? <p className="quiet-state">No ready snapshots are available. Finalize evidence from a device first.</p> : <div className="selection-list audit-selection">{readySnapshots.map(({ device, snapshot }) => <label key={snapshot.snapshot_id}><input type="checkbox" checked={selectedSnapshots.includes(snapshot.snapshot_id)} onChange={(event) => toggleSnapshot(snapshot.snapshot_id, event.target.checked)} /><span><strong>{device.display_name}</strong><small>{snapshot.label ?? `Snapshot ${shortId(snapshot.snapshot_id)}`} · {snapshot.artifact_count} evidence file{snapshot.artifact_count === 1 ? '' : 's'}</small><select aria-label={`Assessment pack for ${device.display_name}`} value={assessmentPackBySnapshot[snapshot.snapshot_id] ?? ''} onChange={(event) => setAssessmentPackBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: event.target.value }))}><option value="">Framework selection</option>{(assessmentPacks.data ?? []).map((pack) => <option key={pack.assessment_pack_version_id} value={pack.assessment_pack_version_id}>{pack.family}: {pack.name} v{pack.version}</option>)}</select><select multiple aria-label={`Frameworks for ${device.display_name}`} disabled={Boolean(assessmentPackBySnapshot[snapshot.snapshot_id])} value={frameworksBySnapshot[snapshot.snapshot_id] ?? []} onChange={(event) => setFrameworksBySnapshot((current) => ({ ...current, [snapshot.snapshot_id]: Array.from(event.target.selectedOptions, (option) => option.value) }))}><option value="cis">CIS Benchmarks</option><option value="nist">NIST SP 800-53</option><option value="disa">DISA STIG/SRG</option><option value="iso">ISO/IEC 27001</option></select></span><StatusBadge value="ready" /></label>)}</div>}
+        {assessmentPacks.isError && <p className="error-message" role="alert">Assessment Pack choices are unavailable: {errorMessage(assessmentPacks.error)}</p>}
+        {batch.isError && <p className="error-message" role="alert">{errorMessage(batch.error)}</p>}
+        <div className="audit-builder-footer"><p className="quiet-state">Select at least two ready snapshots. Rejected items remain visible and do not discard accepted work.</p><button className="button-primary" disabled={selectedSnapshots.length < 2 || batch.isPending} onClick={() => batch.mutate()}>{batch.isPending ? 'Submitting batch...' : `Submit ${selectedSnapshots.length || ''} selected audits`}</button></div>
+      </section>
+      {batchResults && <section className="panel audit-results"><div className="section-title"><div><span className="eyebrow">Batch response</span><h2>Submission results</h2></div><span className="result-summary"><strong>{batchResults.accepted}</strong> accepted · <strong>{batchResults.rejected}</strong> rejected</span></div><div className="result-grid">{batchResults.results.map((result) => { const item = snapshotById.get(result.snapshot_id); return <article className="result-card" key={`${result.snapshot_id}-${result.audit_id ?? result.error_code}`}><div><strong>{item?.device.display_name ?? `Device ${shortId(result.device_id)}`}</strong><StatusBadge value={result.status} /></div><p>{item?.snapshot.label ?? `Snapshot ${shortId(result.snapshot_id)}`}</p>{result.status === 'accepted' && result.audit_id ? <><p>Audit <code>{shortId(result.audit_id)}</code> · Job <code>{shortId(result.job_id ?? '')}</code> · queued</p><div className="button-row"><Link className="button-secondary" to={`/audits/${result.audit_id}`}>Open audit</Link><Link className="button-primary" to={`/findings?audit=${result.audit_id}`}>Open findings</Link></div></> : <p className="error-message">{result.error_message ?? 'This item was rejected and no audit was created.'}</p>}</article> })}</div></section>}
+      <section className="audit-history"><div className="section-title"><div><span className="eyebrow">Recorded activity</span><h2>Audit history</h2></div></div><QueryState pending={audits.isPending} error={audits.error} empty={audits.data?.length === 0 ? 'No audits have been created yet.' : undefined}><div className="table-panel"><table><thead><tr><th>Audit</th><th>Device</th><th>Revision</th><th>Audit state</th><th>Job state</th><th>Created</th></tr></thead><tbody>{audits.data?.map((audit) => <tr key={audit.audit_id}><td><Link to={`/audits/${audit.audit_id}`}>Audit {shortId(audit.audit_id)}</Link></td><td>{names.get(audit.device_id) ?? `Device ${shortId(audit.device_id)}`}</td><td>{audit.revision_number}</td><td><StatusBadge value={audit.status} /></td><td>{audit.job ? <StatusBadge value={audit.job.status} /> : 'Not submitted'}</td><td>{formatDate(audit.created_at)}</td></tr>)}</tbody></table></div></QueryState></section>
     </section>
-    {batchResults && <section className="panel">
-      <div className="section-title"><div><span className="eyebrow">Batch response</span><h2>{batchResults.accepted} accepted - {batchResults.rejected} rejected</h2></div></div>
-      <div className="result-grid">{batchResults.results.map((result) => {
-        const item = snapshotById.get(result.snapshot_id)
-        return <article className="result-card" key={`${result.snapshot_id}-${result.audit_id ?? result.error_code}`}><div><strong>{item?.device.display_name ?? `Device ${shortId(result.device_id)}`}</strong><StatusBadge value={result.status} /></div><p>{item?.snapshot.label ?? `Snapshot ${shortId(result.snapshot_id)}`}</p>{result.status === 'accepted' && result.audit_id ? <><p>Audit <code>{shortId(result.audit_id)}</code> - Job <code>{shortId(result.job_id ?? '')}</code> - queued</p><div className="button-row"><Link className="button-secondary" to={`/audits/${result.audit_id}`}>Open audit</Link><Link className="button-primary" to={`/findings?audit=${result.audit_id}`}>Open findings</Link></div></> : <p className="error-message">{result.error_message ?? 'This item was rejected and no audit was created.'}</p>}</article>
-      })}</div>
-    </section>}
-    <QueryState pending={audits.isPending} error={audits.error} empty={audits.data?.length === 0 ? 'No audits have been created yet.' : undefined}><div className="table-panel"><table><thead><tr><th>Audit</th><th>Device</th><th>Revision</th><th>Audit state</th><th>Job state</th><th>Created</th></tr></thead><tbody>{audits.data?.map((audit) => <tr key={audit.audit_id}><td><Link to={`/audits/${audit.audit_id}`}>Audit {shortId(audit.audit_id)}</Link></td><td>{names.get(audit.device_id) ?? `Device ${shortId(audit.device_id)}`}</td><td>{audit.revision_number}</td><td><StatusBadge value={audit.status} /></td><td>{audit.job ? <StatusBadge value={audit.job.status} /> : 'Not submitted'}</td><td>{formatDate(audit.created_at)}</td></tr>)}</tbody></table></div></QueryState>
-  </section>
+  )
 }

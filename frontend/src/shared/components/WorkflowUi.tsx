@@ -10,8 +10,8 @@ export function QueryState({ pending, error, empty, children }: {
   empty?: string
   children: React.ReactNode
 }) {
-  if (pending) return <p className="quiet-state" aria-live="polite">Loading current data...</p>
-  if (error) return <p className="error-message" role="alert">{errorMessage(error)}</p>
-  if (empty) return <p className="quiet-state">{empty}</p>
+  if (pending) return <p className="quiet-state state-message state-loading" aria-live="polite">Loading current data...</p>
+  if (error) return <p className="error-message state-message state-error" role="alert">{errorMessage(error)}</p>
+  if (empty) return <p className="quiet-state state-message state-empty">{empty}</p>
   return children
 }

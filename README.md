@@ -1,39 +1,170 @@
-# SIH 26155
+# L.O.G.O.S. — Network Security Compliance Auditor
 
-## AI-Driven Multi-Vendor Network Security Compliance Auditor
+L.O.G.O.S. is an evidence-first platform for reviewing bounded network-device
+configuration evidence. It normalizes supplied configurations into traceable,
+deterministic compliance findings with persisted evidence, reviewed
+remediation guidance, and PDF reporting.
 
-SIH 26155 is an evidence-first competition prototype for reviewing bounded
-network-device configuration evidence. It turns supplied configurations into
-traceable, deterministic findings—not an automated device-management system.
+This repository is the SIH26155 project context for the L.O.G.O.S. evaluator
+demo. SIH26155 is not the product name.
 
-## Problem
+## What L.O.G.O.S. does
 
-Configuration reviews are often vendor-specific, difficult to reproduce, and
-hard to connect to evidence. This prototype preserves the submitted evidence,
-normalizes its security meaning, and makes each result reviewable.
-
-## What the prototype does
-
-```text
+~~~text
 Evidence upload -> Device -> immutable Snapshot -> profile detection
 -> structural parsing -> semantic interpretation -> SecurityFacts
 -> EffectiveState -> deterministic compliance -> Findings + Evidence
 -> reviewed remediation guidance -> PDF report -> Fleet Dashboard
-```
+~~~
 
-The advanced extension uses declarative runtime profiles for the registered
-CLI/XML/JSON readers, low-code mappings, executable validation, human approval,
-and immutable Knowledge Packs so future audits can reuse reviewed knowledge.
+PASS, FAIL, and UNKNOWN verdicts come from the deterministic compliance engine
+using persisted evidence and effective state. AI does not decide a verdict,
+approve a mapping, or publish knowledge. Evidence, finalized Snapshots, Audit
+revisions, and published Knowledge Pack versions are immutable at their
+lifecycle boundaries.
 
-## Architecture and trust boundary
+## Prerequisites
 
-PASS, FAIL, and UNKNOWN verdicts are produced by the deterministic compliance
-engine from persisted evidence and effective state. AI does not decide a
-verdict, approve a mapping, or publish knowledge. Evidence, finalized
-Snapshots, Audit revisions, and published Knowledge Pack versions are
-immutable at their lifecycle boundaries.
+For the evaluator flow, install:
 
-## Prototype-supported vendors
+- Windows 10/11 with PowerShell
+- Git
+- Docker Desktop with Docker Compose v2 enabled
+
+The evaluator flow runs the backend, worker, PostgreSQL, and frontend in
+containers. Node.js and Python are only needed for optional native development
+outside Docker.
+
+## Fresh-machine setup (Windows PowerShell)
+
+Run these steps from PowerShell. Replace the example identity values with the
+credentials you want to use for the demo.
+
+### 1. Clone the repository
+
+~~~powershell
+git clone https://github.com/Im8beGod/security-configuration-auditor.git
+Set-Location security-configuration-auditor
+~~~
+
+### 2. Create the environment file
+
+~~~powershell
+Copy-Item .env.example .env
+notepad .env
+~~~
+
+At minimum, replace these values in .env:
+
+- POSTGRES_PASSWORD: a strong local PostgreSQL password. It is used when the
+  PostgreSQL data volume is initialized and is shared by the Compose services.
+- JWT_SECRET: a long, random signing secret for login tokens. Never commit
+  .env or reuse this value outside the local deployment.
+
+Keep the local defaults for POSTGRES_HOST=postgres, POSTGRES_PORT=5432,
+BACKEND_PORT=8000, FRONTEND_PORT=5173, and VITE_API_BASE_URL unless your
+machine already uses those host ports.
+
+### 3. Validate the Compose file
+
+~~~powershell
+docker compose config --quiet
+~~~
+
+No output and exit code 0 means the rendered Compose configuration is valid.
+
+### 4. Start PostgreSQL
+
+~~~powershell
+docker compose up -d postgres
+docker compose ps postgres
+~~~
+
+Wait until the postgres service reports healthy.
+
+### 5. Apply all database migrations
+
+The backend and worker do not migrate automatically. Run the repository's
+Alembic configuration through the backend image:
+
+~~~powershell
+docker compose run --rm backend alembic -c database/alembic.ini upgrade head
+~~~
+
+### 6. Create the first administrator
+
+The command prompts for the password twice without echoing it:
+
+~~~powershell
+docker compose run --rm backend python -m app.cli.bootstrap_admin --organization-name "L.O.G.O.S. Demo" --organization-slug logos-demo --email admin@example.com
+~~~
+
+Use the same email and password at the login screen. The organization slug and
+email must be unique in the database.
+
+### 7. Start all services
+
+~~~powershell
+docker compose up -d --build
+docker compose ps
+~~~
+
+Compose starts PostgreSQL, the FastAPI backend, the durable worker, and the
+React frontend. The backend and frontend services have health checks.
+
+### 8. Verify backend and frontend health
+
+~~~powershell
+(Invoke-WebRequest -UseBasicParsing http://localhost:8000/health).Content
+(Invoke-WebRequest -UseBasicParsing http://localhost:5173/).StatusCode
+~~~
+
+The backend response should contain {"status":"healthy"} and the frontend
+request should return HTTP status 200.
+
+### 9. Open and sign in
+
+Open http://localhost:5173 and sign in with the administrator created above.
+
+## Database reset and credential changes
+
+To remove the PostgreSQL volume and rebuild the local stack from an empty
+database:
+
+~~~powershell
+docker compose down -v --remove-orphans
+docker compose up -d postgres
+docker compose run --rm backend alembic -c database/alembic.ini upgrade head
+docker compose run --rm backend python -m app.cli.bootstrap_admin --organization-name "L.O.G.O.S. Demo" --organization-slug logos-demo --email admin@example.com
+docker compose up -d --build
+~~~
+
+The -v flag permanently removes the Compose PostgreSQL volume and its data.
+Changing POSTGRES_PASSWORD after that volume has already been initialized
+does not change the password stored inside PostgreSQL. Either restore the
+original value in .env, reconcile the database password manually, or use the
+reset above for a clean local deployment.
+
+## Quick evaluator demo
+
+After signing in:
+
+1. Open **Upload / Evidence** and upload the files in demo/configurations/.
+2. Create a Device and an evidence Snapshot for each supplied vendor sample.
+3. Finalize the Snapshot, open **Audits**, select at least two ready Snapshots,
+   and choose the applicable framework or Assessment Pack.
+4. Run the audits, then review the dashboard posture, findings, persisted
+   evidence, reviewed remediation preview, and PDF report.
+5. Optionally upload unknown-vendor.cfg, open the Mapping Review area, create
+   a bounded mapping, validate it against evidence, approve it, publish it, and
+   re-evaluate the same evidence.
+
+The supplied samples are safe local text fixtures. Do not upload production
+secrets or live credentials.
+
+## Supported scope
+
+### Vendors and readers
 
 - Cisco IOS XE 17.x
 - Fortinet FortiOS 7.x
@@ -41,122 +172,64 @@ immutable at their lifecycle boundaries.
 - Arista EOS 4.x
 - Generic CLI ingestion for administrator-supervised training
 
-Coverage is intentionally profile- and version-bounded; this is not universal
-support for every vendor or release.
+Coverage is profile- and version-bounded. This is not universal support for
+every vendor, platform, or release.
 
-## Assessment frameworks
-
-Implemented AssessmentPacks provide scoped technical prototype coverage for:
+### Assessment frameworks
 
 - NIST SP 800-53 Rev. 5
 - DISA Network Device Management SRG
 - CIS Cisco IOS XE 17.x Benchmark v2.2.1
 - ISO/IEC 27001:2022 technical alignment derived through NIST OLIR
 
-NIST, DISA, and CIS packs are scoped technical subsets. ISO material is
-technical alignment only.
+These are scoped technical subsets or alignment packs. L.O.G.O.S. does not
+provide NIST, DISA, STIG, CIS, or ISO certification, CIS-CAT equivalence, full
+framework coverage, universal compliance, or ISO conformity assessment.
 
-## Key features
+## Optional local Ollama assistance
 
-- Single- and multi-file evidence upload with device and immutable Snapshot records
-- Profile-aware multi-vendor normalization into shared SecurityFacts and EffectiveState
-- Deterministic PASS, FAIL, and UNKNOWN findings with persisted evidence and provenance
-- Reviewed, preview-only remediation guidance across Cisco, FortiOS, Junos, and Arista
-- PDF reporting and a fleet dashboard
-- Low-code mapping, validation, approval, immutable Knowledge Packs, and historical re-evaluation
-- Admin-only runtime publishing for profiles, safe automatic rules, and assessment packs
+Ollama is optional and disabled by default. Auditing and the evaluator demo do
+not require it. When enabled, it provides advisory mapping suggestions only;
+there is no cloud fallback, automatic approval, or verdict authority.
 
-## AI safety boundary
+Set these values in .env only when a local Ollama service and the configured
+model are available:
 
-Optional local Ollama integration provides mapping suggestions only. There is
-no cloud fallback, no automatic approval, and auditing continues without AI.
-Normal CI uses mocked responses for deterministic schema/DSL, redaction,
-injection, local-origin, and outage coverage. The manual-only **Live Ollama
-Acceptance** workflow pulls its selected local model and exercises the real
-provider through suggestion, draft adoption, validation, approval, immutable
-publication, and audit re-evaluation. It is intentionally not part of normal
-CI; model availability and output quality are acceptance inputs, not a
-deterministic build dependency.
+~~~dotenv
+AI_MAPPING_SUGGESTIONS_ENABLED=true
+AI_MAPPING_PROVIDER=ollama
+AI_OLLAMA_BASE_URL=http://host.docker.internal:11434
+AI_OLLAMA_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
+~~~
 
 ## Remediation safety boundary
 
-Remediation is reviewed guidance and preview only. The system never executes
+Remediation is reviewed guidance and preview only. L.O.G.O.S. never executes
 device commands and never autonomously modifies device configurations.
 
-## Technology stack
+## Technology and repository structure
 
 FastAPI and Python, PostgreSQL with Alembic, a PostgreSQL-backed worker,
 React/TypeScript, Docker Compose, and local artifact/report storage.
 
-## Quick start
+- backend/ — FastAPI application, domain services, tests, and fixtures
+- frontend/ — React and TypeScript application
+- database/ — Alembic configuration and migrations
+- worker/ — PostgreSQL durable-job worker runtime
+- demo/configurations/ — safe evaluator configuration samples
+- docs/ — architecture and demonstration material
+- storage/ — local artifact and report mounts
 
-Prerequisites: Python 3.13+, Node.js/npm, Docker Desktop, Docker Compose, and Git.
+## Migration and verification commands
 
-```powershell
-Copy-Item .env.example .env
-# Replace development-only placeholders in .env.
-docker compose config --quiet
-docker compose up -d --build
-docker compose run --rm backend alembic -c database/alembic.ini upgrade head
-```
+The current Alembic head is 20260924_0027:
 
-The frontend is available at `http://localhost:5173`; the API is at
-`http://localhost:8000` (`GET /health`).
-
-## 3-5 minute demo
-
-1. Sign in and open the Fleet Dashboard.
-2. Upload files from `demo/configurations/` for Cisco, FortiOS, Junos, and
-   Arista; create one Device and Snapshot per vendor.
-3. Select the applicable frameworks and run each audit.
-4. Show control coverage, evidence, a validated remediation preview, and PDF.
-5. Upload `unknown-vendor.cfg`, map one command, approve and publish it, then
-   re-evaluate the same evidence without redeployment.
-
-Use [the demo runbook](docs/demo-runbook.md) for judge narration.
-
-## Repository structure
-
-- `backend/` — FastAPI application, domain services, tests, and fixtures
-- `frontend/` — React and TypeScript application
-- `database/` — Alembic configuration and migrations
-- `worker/` — PostgreSQL durable-job worker runtime
-- `docs/` — architecture and demonstration material
-- `storage/` — local development artifact and report mounts
-
-## Known limitations
-
-- Framework coverage is a prototype subset, not certification.
-- There is no public/cloud production deployment in this repository.
-- Vendor and version coverage is intentionally bounded.
-- Local AI assistance is optional and advisory only.
-- The persistent PostgreSQL worker provides durable jobs, transactional
-  claiming with `FOR UPDATE SKIP LOCKED`, explicit handlers, bounded failure
-  metadata, graceful shutdown, and no automatic retries. A hard worker/process
-  failure after a job enters PROCESSING can require manual operational recovery.
-
-## Prototype and non-certification disclaimer
-
-This prototype does not provide NIST, DISA, STIG, CIS, or ISO certification;
-does not provide CIS-CAT equivalence; and does not claim full framework
-coverage, universal compliance, or ISO conformity assessment.
-
-## Migration and verification
-
-The final Alembic head is `20260924_0027`. The backend and worker never apply
-migrations automatically.
-
-```powershell
+~~~powershell
 docker compose run --rm backend alembic -c database/alembic.ini heads
 docker compose run --rm backend alembic -c database/alembic.ini current
 docker compose run --rm backend alembic -c database/alembic.ini check
 git diff --check
-```
+~~~
 
-Externally supplied licensed CIS and ISO control files can be imported as
-manual-only versioned packs through the administrator API or CLI. See
-[the catalog import contract](docs/catalog-import.md). Imported controls never
-receive automatic evaluators or invented PASS results.
-
-Real `.env` files, secrets, uploaded artifacts, reports, caches, database
+Real .env files, secrets, uploaded artifacts, reports, caches, database
 dumps, and runtime storage must never be committed.
